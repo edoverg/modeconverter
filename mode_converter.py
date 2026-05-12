@@ -1,6 +1,7 @@
+# %% [markdown]
 # This is a first attempt at creating an inverse designed fiber mode converter in meep. At first, we try to implement and combine tutorials from both tidy3d and meep.
 
-
+# %%
 import meep as mp
 import meep.adjoint as mpa
 import numpy as np
@@ -12,7 +13,7 @@ from matplotlib.patches import Circle
 import scipy as sp
 import os
 
-
+# %%
 ######PHYSICS SETUP######
 
 mp.verbosity(1)
@@ -38,7 +39,7 @@ buffer = 2.5
 pml_size = 1.0
 pml_layers = [mp.PML(pml_size)]
 
-
+# %%
 ######FILTER######
 minimum_length = 0.09  # minimum length scale (microns)
 eta_i = (
@@ -48,7 +49,7 @@ eta_e = 0.55  # erosion design field thresholding point (between 0 and 1)
 eta_d = 1 - eta_e  # dilation design field thresholding point (between 0 and 1)
 filter_radius = mpa.get_conic_radius_from_eta_e(minimum_length, eta_e)
 
-
+# %%
 ######DESIGN REGION######
 design_region_width = 4.0
 design_region_length = 4.0
@@ -104,7 +105,7 @@ geometry = [
     design_region_block,
 ]
 
-
+# %%
 ######SOURCE######
 fcen = 1 / wavelength
 width = 0.2
@@ -116,7 +117,7 @@ source = [mp.Source(src, component=mp.Ex, size=source_size, center=source_center
 #src = mp.ContinuousSource(frequency=fcen, fwidth=fwidth, is_integrated=True)
 #source = [mp.Source(src, component=mp.Ex, size=source_size, center=source_center)]
 
-
+# %%
 ######SIMULATION######
 kpoint = mp.Vector3()
 sim = mp.Simulation(
@@ -128,7 +129,7 @@ sim = mp.Simulation(
     resolution = resolution,
 )
 
-
+# %%
 ######MONITOR######
 far_field_obs_point_z_coord = 15
 far_z = [mp.Vector3(0,0,far_field_obs_point_z_coord)] #this is the far-field-focal-point
@@ -153,7 +154,7 @@ def J1(FF):
     return obj_to_return
 #returns the first point of all frequencies of the Ey component
 
-
+# %%
 ######CHECK PLOT######
 output_plane = mp.Volume(
     center=mp.Vector3(0,0,0), 
@@ -169,7 +170,7 @@ fig = sim.plot2D(show_sources=True,show_monitors=True,show_epsilon=True, output_
 #sim.plot2D(fields=mp.Ex,output_plane=output_plane)
 #plt.savefig("fields.pdf")
 
-
+# %%
 ######OPTIMIZATION PROBLEM######
 '''
 An OptimizationProblem class object knows how to do one basic thing: 
@@ -189,10 +190,9 @@ opt = mpa.OptimizationProblem(
 
 ######CHECK PLOT######
 figure = opt.plot2D(True, output_plane=output_plane)
-plt.savefig("results/simulation_setup.pdf")
 
 
-
+# %%
 def mapping(x,eta,beta):
     '''
     Arguments:
@@ -253,9 +253,9 @@ def f(v, gradient, cur_beta):
         False, 
         ax=ax1,
         output_plane=output_plane,
-        show_sources = True,
-        show_monitors = True,
-        show_boundary_layers = True,
+        show_sources = False,
+        show_monitors = False,
+        show_boundary_layers = False,
         )
     circ1 = Circle((2,2), minimum_length/2)
     ax1.add_patch(circ1)
@@ -264,13 +264,16 @@ def f(v, gradient, cur_beta):
         False, 
         ax=ax2,
         output_plane=output_plane_xy,
-        show_sources = True,
-        show_monitors = True,
-        show_boundary_layers = True,
+        show_sources = False,
+        show_monitors = False,
+        show_boundary_layers = False,
         )
     circ2 = Circle((2,2), minimum_length/2)
     ax2.add_patch(circ2)
     
+    if not os.path.exists("results"):
+        os.makedirs("results")
+
     plt.savefig("results/iter_{}.pdf".format(cur_iter[0]+1))
 
     cur_iter[0] += cur_iter[0] + 1
@@ -309,6 +312,7 @@ if optimization_start:
         cur_beta = cur_beta * beta_scale #update beta
         print("current beta: ", cur_beta)
 
+# %%
 ######RESULTS######
 #plot the figure of merit over iterations
 plt.figure()
@@ -328,9 +332,9 @@ opt.plot2D(
     False, 
     ax=ax1,
     output_plane=output_plane,
-    show_sources = True,
-    show_monitors = True,
-    show_boundary_layers = True,
+    show_sources = False,
+    show_monitors = False,
+    show_boundary_layers = False,
 )
 
 circ1 = Circle((2,2), minimum_length/2)
@@ -341,15 +345,12 @@ opt.plot2D(
     False, 
     ax=ax2,
     output_plane=output_plane_xy,
-    show_sources = True,
-    show_monitors = True,
-    show_boundary_layers = True,
+    show_sources = False,
+    show_monitors = False,
+    show_boundary_layers = False,
 )
 circ2 = Circle((2,2), minimum_length/2)
 ax2.add_patch(circ2)
 ax2.axis("off")
     
-plt.savefig("results/final_design.pdf")
-
-
-
+plt.savefig("results/final_design_xy.pdf")
