@@ -17,6 +17,10 @@ import os
 
 mp.verbosity(1)
 
+#setup a results folder
+if not os.path.exists("results"):
+    os.makedirs("results")
+
 subs_index = 3.4
 subs_perm = subs_index**2
 
@@ -267,9 +271,6 @@ def f(v, gradient, cur_beta):
     circ2 = Circle((2,2), minimum_length/2)
     ax2.add_patch(circ2)
     
-    if not os.path.exists("results"):
-        os.makedirs("results")
-
     plt.savefig("results/iter_{}.pdf".format(cur_iter[0]+1))
 
     cur_iter[0] += cur_iter[0] + 1
@@ -307,7 +308,6 @@ if optimization_start:
         x[...] = solver.optimize(x)
         cur_beta = cur_beta * beta_scale #update beta
         print("current beta: ", cur_beta)
-
 
 ######RESULTS######
 #plot the figure of merit over iterations
