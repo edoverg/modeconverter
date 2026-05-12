@@ -185,7 +185,7 @@ opt = mpa.OptimizationProblem(
     objective_arguments=ob_list, #the optimizer passes this list of arguments to the objective function
     design_regions=[design_region], #the optimizer updates the design variables in this design region
     frequencies=frequencies, #the optimizer runs the simulation at these frequencies
-    maximum_run_time=500, #maximum optimizer run time
+    maximum_run_time=1500, #maximum optimizer run time
 )
 
 ######CHECK PLOT######
