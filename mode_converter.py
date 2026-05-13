@@ -142,7 +142,7 @@ NearRegions = [
 ]
 #mpa.Near2FarFields return a numpy array with shape (num_of_points,nfreq,6) where the 
 #third axis are the field components Ex,Ey,Ez,Hx,Hy,Hz
-FarFields = mpa.Near2FarFields(sim,NearRegions,far_z)
+FarFields = mpa.Near2FarFields(sim, NearRegions, far_z)
 ob_list = [FarFields]
 
 #this the objective to function
@@ -150,7 +150,7 @@ ob_list = [FarFields]
 def J1(FF):
     #in this case we want to maximize field intensity
     # at the position of the focal spot 
-    obj_to_return = npa.mean(npa.abs(FF[0,:,1]) ** 2)
+    obj_to_return = npa.mean(npa.abs(FF[0,:,0]) ** 2)
     return obj_to_return
 #returns the first point of all frequencies of the Ey component
 
@@ -190,7 +190,7 @@ opt = mpa.OptimizationProblem(
 
 ######CHECK PLOT######
 figure = opt.plot2D(True, output_plane=output_plane)
-
+plt.savefig("results/simulation_setup.pdf")
 
 # %%
 def mapping(x,eta,beta):
