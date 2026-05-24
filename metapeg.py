@@ -59,7 +59,7 @@ design_region_width = 4.0
 design_region_length = 4.0
 design_region_height = (wavelength/np.sqrt(subs_index))/2 #half-wavelength in the substrate
 
-resolution = 20 # pixels/um
+resolution = 5 # pixels/um
 design_region_resolution = int(resolution)
 
 #number of pixels in the design region
@@ -133,6 +133,7 @@ output_plane_xy = mp.Volume(
 
 # %%
 ######SIMULATION######
+sim_run_time = 100
 kpoint = mp.Vector3()
 sim = mp.Simulation(
     cell_size = cell_size,
@@ -261,7 +262,7 @@ norm_near2far = norm_sim.add_near2far(fcen,0,1,*NearRegions)
 norm_sim.plot2D(output_plane=output_plane,show_sources=True, show_boundaries=True, show_geometry=True)
 plt.savefig("results/normalization_simulation_geometry.pdf")
 
-norm_sim.run(until=1500)
+norm_sim.run(until=sim_run_time)
 ref_fields = np.array([norm_sim.get_farfield(norm_near2far, point) for point in far_z_plane])
 #TODO this todo is linked to the one above. Need to check if the far-field need to be flipped or something
 #at this time, the two definition are consistent with each other.
@@ -424,8 +425,8 @@ ub = np.ones((Nx * Ny,))
 
 cur_beta = 4 #starting beta
 beta_scale = 2 #beta scaling (update) factor
-num_betas = 6 #number of betas to test
-update_factor = 12 #number of iterations per beta
+num_betas = 3 #number of betas to test
+update_factor = 1 #number of iterations per beta
 #total number of simulations = num_betas * update_factor * 2 (forward + adjoint)
 ftol = 1e-5
 
@@ -514,6 +515,12 @@ full_output_plane = mp.Volume(
     center=mp.Vector3(0,0,0), 
     size=mp.Vector3(Sx,0,full_Sz))
 
-opt.sim.plot2D(output_plane=full_output_plane,fields=mp.Ex)
+design_output_plane = mp.Volume(
+    center=mp.Vector3(0,0,10),
+    size=mp.Vector3(design_region_width,design_region_length,0)
+)
+
+#understand how to retrieve the far-field data at the design output plane
+opt.sim.plot2D(output_plane=full_output_plane,fields=mp.Ex, show_sources=True, show_boundaries=True, show_geometry=True)
 plt.savefig("results/full_simulation_geometry.pdf")
-opt.sim.run(until=1500)
+opt.sim.run(until=sim_run_time)
