@@ -16,12 +16,12 @@ if not os.path.exists("results"):
     os.makedirs("results")
 
 ###### PHYSICS SETUP ######
-RESOLUTION = 20 #50 #pixels per unit length
+RESOLUTION = 30 #50 #pixels per unit length
 MAX_RUN_TIME = 1100 #meep units
 WAVELENGTH_MIN_UM = 1.50
 WAVELENGTH_MAX_UM = 1.60
 PML_UM = 1.0 #PML thickness
-BUFFER = 2.0
+BUFFER = 3.0
 DESIGN_WAVELENGTHS_UM = [1.50,1.55,1.60] #wavelengths at which to optimize the device
 DESIGN_REGION_UM = mp.Vector3(5,5,1)
 DESIGN_REGION_RESOLUTION = int(2 * RESOLUTION)
@@ -40,12 +40,12 @@ SIGMOID_THRESHOLD_DILATION = 1 - SIGMOID_THRESHOLD_EROSION
 cell_um = mp.Vector3(
     DESIGN_REGION_UM.x + 2*BUFFER + 2*PML_UM,
     DESIGN_REGION_UM.y + 2*BUFFER + 2*PML_UM,
-    DESIGN_REGION_UM.z + 2*BUFFER + 2*PML_UM
+    2*BUFFER + 2*PML_UM
 )
 
-SUBSTRATE_THICKNESS = cell_um.z/2
+SUBSTRATE_THICKNESS = BUFFER + PML_UM
 SUBSTRATE_SIZE = mp.Vector3(cell_um.x, cell_um.y, SUBSTRATE_THICKNESS)
-SUBSTRATE_CENTER = mp.Vector3(0, 0, - SUBSTRATE_THICKNESS / 2)
+SUBSTRATE_CENTER = mp.Vector3(0, 0, -SUBSTRATE_THICKNESS/2)
 
 physical_domains_size = mp.Vector3(
     DESIGN_REGION_UM.x + 2*BUFFER,
@@ -63,10 +63,10 @@ frequency_center = 0.5 * (frequency_min + frequency_max)
 wavelength_center = 1 / frequency_center #remember that c = 1 in meep units
 frequency_width = frequency_max - frequency_min
 
-SOURCE_CENTER = mp.Vector3(0,0,-BUFFER)
+SOURCE_CENTER = mp.Vector3(0,0,-2)
 SOURCE_SIZE = mp.Vector3(physical_domains_size.x,physical_domains_size.y,0)
 
-NEAR_REGION_MONITOR_CENTER = mp.Vector3(0,0, DESIGN_REGION_UM.z+0.5)
+NEAR_REGION_MONITOR_CENTER = mp.Vector3(0,0, DESIGN_REGION_UM.z + BUFFER/2)
 NEAR_REGION_MONITOR_SIZE = mp.Vector3(physical_domains_size.x,physical_domains_size.y,0)
 
 ff_monitor_center = mp.Vector3(0,0,DESIGN_REGION_UM.z + BUFFER)
@@ -198,6 +198,9 @@ def epigraph_constraint(
     #modify in place the constraint result
     result[:] = np.real(obj_val) - epigraph
 
+    objfunc_history.append(np.real(obj_val))
+    epivar_history.append(epigraph)
+
     print(
         f"iteration:, {cur_iter[0]:3d}, sigmoid_bias: {sigmoid_bias:2d}, "
         f"epigraph: {epigraph:.5f}, obj. func.: {obj_val}, "
@@ -324,7 +327,8 @@ def intensity_desired_fn_pattern(
     pattern_to_return = npa.nan_to_num(pattern_interp.values, nan=npa.min(pattern_interp)).flatten()
     
     #make a plot before returning
-    fig, ax = plt.subplots()
+    plt.figure()
+    ax = plt.gca()
     im = ax.imshow(
         pattern_final,
         extent=(min(xs), max(xs), min(ys), max(ys)),
@@ -334,7 +338,7 @@ def intensity_desired_fn_pattern(
     ax.set_xlabel('x (um)')
     ax.set_ylabel('y (um)')
     ax.set_title('Target Intensity Pattern')
-    fig.colorbar(im, ax=ax, label='Intensity (a.u.)')
+    plt.colorbar(im, ax=ax, label='Intensity (a.u.)')
     plt.savefig("results/target_intensity_pattern.pdf")
 
     return pattern_to_return
@@ -377,9 +381,10 @@ def normalization_sim() -> np.ndarray:
         k_point=mp.Vector3(),
     )
 
-    fig, ax = plt.subplot()
+    plt.figure()
+    ax = plt.gca()
     norm_sim.plot2D(output_plane=view_2D_plane, ax=ax)
-    fig.savefig("results/normalization_sim_setup.pdf")
+    plt.savefig("results/normalization_sim_setup.pdf")
     
 
     NearRegions = [mp.Near2FarRegion(
@@ -433,22 +438,6 @@ def intensity_from_farfields(FarFields) -> np.ndarray:
     
     intensity_x = npa.abs(FarFields[:,:,0]) ** 2
 
-    #make a plot before returning of the central wavelength
-    #for the title use cur_iter
-    intensity_x_f2 = intensity_x[:,1].reshape(NX_DESIGN_GRID, NY_DESIGN_GRID)
-    fig, ax = plt.subplots()
-    im = ax.imshow(
-        intensity_x_f2,
-        extent=(min(xs), max(xs), min(ys), max(ys)),
-        origin='lower',
-        cmap='inferno',
-    )
-    ax.set_xlabel('x (um)')
-    ax.set_ylabel('y (um)')
-    ax.set_title('Simulated Intensity Pattern at Monitor (central wavelength) - iteration ' + str(cur_iter[0]))
-    fig.colorbar(im, ax=ax, label='Intensity (a.u.)')
-    plt.savefig("results/simulated_intensity_pattern_monitor"+str(cur_iter[0])+".png")
-
     return intensity_x
 
 def intensity_optimization(
@@ -485,10 +474,10 @@ def intensity_optimization(
     )
 
     matgrid_block = mp.Block(
-            center=matgrid_region.center,
-            size=matgrid_region.size,
-            material=matgrid,
-        )
+        center=matgrid_region.center,
+        size=matgrid_region.size,
+        material=matgrid,
+    )
 
     substrate_block = mp.Block(
         center = SUBSTRATE_CENTER,
@@ -520,9 +509,10 @@ def intensity_optimization(
         k_point=mp.Vector3(),
     )
 
-    fig, ax = plt.subplot()
+    plt.figure()
+    ax = plt.gca()
     sim.plot2D(output_plane=view_2D_plane,show_monitors=True,ax=ax)
-    fig.savefig("results/optimization_sim_setup.pdf")
+    plt.savefig("results/optimization_sim_setup.pdf")
 
     NearRegions = [
         mp.Near2FarRegion(
@@ -574,9 +564,10 @@ def intensity_optimization(
         maximum_run_time=MAX_RUN_TIME
     )
 
-    fig, ax = plt.subplot()
+    plt.figure()
+    ax = plt.gca()
     opt.plot2D(True,output_plane=view_2D_plane, ax=ax)
-    fig.savefig("results/OPT_PROB_SETUP.pdf")
+    plt.savefig("results/OPT_PROB_SETUP.pdf")
     
     return opt
 
@@ -602,7 +593,7 @@ if __name__ == "__main__":
 
     sigmoid_biases = [8, 16, 32, 64, 128, 256]
     #max_evals = [80, 80, 100, 120, 120, 100]
-    max_evals = [10, 10, 10, 10, 10, 10]
+    max_evals = [50, 50, 60, 70, 70, 60]
     epigraph_tolerance = np.array([1e-4]*num_wavelengths)
     tolerance_width_and_spacing = np.array([1e-8]*2)
 
@@ -639,9 +630,10 @@ if __name__ == "__main__":
             sigmoid_bias=sigmoid_bias,
         )
 
-        fig, ax = plt.subplots()
+        plt.figure()
+        ax = plt.gca()
         opt.plot2D(True,output_plane=view_2D_plane, ax=ax)
-        fig.savefig(f"results/optimization_problem_geometry.pdf")
+        plt.savefig(f"results/optimization_problem_geometry.pdf")
 
         #the minimum linewidth and spacing constraint
         #is activated only in the last epoch. This is done
@@ -727,5 +719,18 @@ if __name__ == "__main__":
                 fmt="%4.2f",
                 delimiter=",",
             )
+        
+
+
+    plt.figure()
+    plt.subplot(1,2,1)
+    plt.plot(objfunc_history, label="Objective function value")
+    plt.subplot(1,2,2)
+    plt.plot(epivar_history, label="Epigraph variable value")
+    plt.xlabel("Iteration")
+    plt.ylabel("Value")
+    plt.legend()
+    plt.savefig("results/optimization_history.pdf")
+
 
     print("Normalization simulation completed")
