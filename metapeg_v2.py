@@ -10,7 +10,7 @@ import os
 import xarray as xr
 from PIL import Image
 
-mp.verbosity(0)
+mp.verbosity(1)
 
 if not os.path.exists("results"):
     os.makedirs("results")
