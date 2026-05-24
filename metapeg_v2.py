@@ -75,7 +75,7 @@ xs = ys = np.linspace(-ff_monitor_size.x/2, ff_monitor_size.x/2, NX_DESIGN_GRID)
 #collection of points in the far-field monitor
 ff_points = [mp.Vector3(x_p,y_p,ff_monitor_center.z) for x_p in xs for y_p in ys] 
 
-stop_cond = mp.stop_when_fields_decayed(50, mp.Ex, ff_monitor_center, 1e-6)
+stop_cond = mp.stop_when_fields_decayed(50, mp.Ex, NEAR_REGION_MONITOR_CENTER, 1e-6)
 
 pml_layers = [mp.PML(PML_UM)]
 frequencies = [1/wavelength for wavelength in DESIGN_WAVELENGTHS_UM]
