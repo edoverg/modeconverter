@@ -410,7 +410,7 @@ def normalization_sim() -> np.ndarray:
 
     #norm_sim.run(until_after_sources=stop_cond)
     norm_sim.run(
-        mp.at_every(20,mp.in_volume(
+        mp.at_every(10,mp.in_volume(
             mp.Volume(center=mp.Vector3(), size=physical_domains_size),
             mp.output_efield_x
         )),
