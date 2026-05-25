@@ -2,6 +2,7 @@ from typing import List, NamedTuple, Tuple
 
 from autograd import numpy as npa, tensor_jacobian_product, grad
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 import meep as mp
 import meep.adjoint as mpa
 import nlopt
@@ -10,25 +11,25 @@ import os
 import xarray as xr
 from PIL import Image
 
-mp.verbosity(1)
+mp.verbosity(3)
 
 if not os.path.exists("results"):
     os.makedirs("results")
 
 ###### PHYSICS SETUP ######
-RESOLUTION = 30 #50 #pixels per unit length
+RESOLUTION = 18 #pixels per meep unit length (1um)
 MAX_RUN_TIME = 1100 #meep units
 WAVELENGTH_MIN_UM = 1.50
 WAVELENGTH_MAX_UM = 1.60
 PML_UM = 1.0 #PML thickness
-BUFFER = 3.0
+BUFFER = 2.0
 DESIGN_WAVELENGTHS_UM = [1.50,1.55,1.60] #wavelengths at which to optimize the device
-DESIGN_REGION_UM = mp.Vector3(5,5,1)
+DESIGN_REGION_UM = mp.Vector3(2,2,1)
 DESIGN_REGION_RESOLUTION = int(2 * RESOLUTION)
 DESIGN_REGION_CENTER = mp.Vector3(0, 0, DESIGN_REGION_UM.z / 2)
 NX_DESIGN_GRID = int(DESIGN_REGION_UM.x * DESIGN_REGION_RESOLUTION) + 1 
 NY_DESIGN_GRID = int(DESIGN_REGION_UM.y * DESIGN_REGION_RESOLUTION) + 1
-MIN_LENGTH_UM = 0.15 #150 nm minimum length scale
+MIN_LENGTH_UM = 0.5 #500 nm minimum length scale
 SILICON = mp.Medium(index = 3.5)
 SILICON_DIOXIDE = mp.Medium(index = 1.5)
 AIR = mp.Medium(index = 1.0)
@@ -63,10 +64,10 @@ frequency_center = 0.5 * (frequency_min + frequency_max)
 wavelength_center = 1 / frequency_center #remember that c = 1 in meep units
 frequency_width = frequency_max - frequency_min
 
-SOURCE_CENTER = mp.Vector3(0,0,-2)
+SOURCE_CENTER = mp.Vector3(0,0,-BUFFER/2)
 SOURCE_SIZE = mp.Vector3(physical_domains_size.x,physical_domains_size.y,0)
 
-NEAR_REGION_MONITOR_CENTER = mp.Vector3(0,0, DESIGN_REGION_UM.z + BUFFER/2)
+NEAR_REGION_MONITOR_CENTER = mp.Vector3(0,0, DESIGN_REGION_UM.z)
 NEAR_REGION_MONITOR_SIZE = mp.Vector3(physical_domains_size.x,physical_domains_size.y,0)
 
 ff_monitor_center = mp.Vector3(0,0,DESIGN_REGION_UM.z + BUFFER)
@@ -75,7 +76,7 @@ xs = ys = np.linspace(-ff_monitor_size.x/2, ff_monitor_size.x/2, NX_DESIGN_GRID)
 #collection of points in the far-field monitor
 ff_points = [mp.Vector3(x_p,y_p,ff_monitor_center.z) for x_p in xs for y_p in ys] 
 
-stop_cond = mp.stop_when_fields_decayed(50, mp.Ex, NEAR_REGION_MONITOR_CENTER, 1e-6)
+stop_cond = mp.stop_when_fields_decayed(25, mp.Ex, NEAR_REGION_MONITOR_CENTER, 1e-6)
 
 pml_layers = [mp.PML(PML_UM)]
 frequencies = [1/wavelength for wavelength in DESIGN_WAVELENGTHS_UM]
@@ -343,6 +344,15 @@ def intensity_desired_fn_pattern(
 
     return pattern_to_return
 
+
+def record_fields(sim):
+    plt.figure()
+    ax = plt.gca()
+    sim.plot2D(output_plane=view_2D_plane, fields=mp.Ex, ax=ax)
+    plt.savefig(f"results/fields_t{sim.timestep()}.pdf")
+    plt.close()
+    return True
+
 def normalization_sim() -> np.ndarray:
     ''' Computes the Far-Field pattern at the monitor location and
     without the design region. Used for normalization purposes. 
@@ -354,7 +364,9 @@ def normalization_sim() -> np.ndarray:
 
     sources = [
         mp.Source(
-            src=mp.GaussianSource(frequency_center, fwidth=frequency_width),
+            src=mp.GaussianSource(
+                frequency=frequency_center, 
+                fwidth=frequency_width/2),
             component=mp.Ex,
             center=SOURCE_CENTER,
             size=SOURCE_SIZE,
@@ -379,6 +391,7 @@ def normalization_sim() -> np.ndarray:
         geometry=geometry,
         boundary_layers=pml_layers,
         k_point=mp.Vector3(),
+        split_chunks_evenly=False,
     )
 
     plt.figure()
@@ -395,7 +408,21 @@ def normalization_sim() -> np.ndarray:
 
     norm_near2far = norm_sim.add_near2far(frequencies, *NearRegions)
 
-    norm_sim.run(until_after_sources=stop_cond)
+    #norm_sim.run(until_after_sources=stop_cond)
+    norm_sim.run(
+        mp.at_every(20,mp.in_volume(
+            mp.Volume(center=mp.Vector3(), size=physical_domains_size),
+            mp.output_efield_x
+        )),
+        #mp.at_every(20,record_fields),
+        until_after_sources=stop_cond
+    )
+    #make a plot of the fields
+    plt.figure()
+    ax = plt.gca()
+    norm_sim.plot2D(output_plane=view_2D_plane, fields=mp.Ex, ax=ax)
+    plt.savefig("results/NORM_FIELDS.pdf")
+
 
     ref_fields = np.array(
         [norm_sim.get_farfield(norm_near2far, point) for point in ff_points]
@@ -507,6 +534,7 @@ def intensity_optimization(
         geometry=geometry,
         boundary_layers=pml_layers,
         k_point=mp.Vector3(),
+        split_chunks_evenly=False,
     )
 
     plt.figure()
