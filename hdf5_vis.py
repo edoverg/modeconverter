@@ -29,7 +29,7 @@ print(max_clim)
 def animate(frame):
     ax.clear()
 
-    im = ax.imshow(np.rot90(np.abs(data[frame][:,0,:]),k=1), origin="lower", 
+    im = ax.imshow(np.rot90(np.abs(data[frame][:,0,:]),k=3), origin="lower", 
                    extent=[z.min(), z.max(),x.min(), x.max(),],
                    
                    cmap="viridis",

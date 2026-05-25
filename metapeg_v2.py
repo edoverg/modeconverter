@@ -11,20 +11,20 @@ import os
 import xarray as xr
 from PIL import Image
 
-mp.verbosity(3)
+mp.verbosity(2)
 
 if not os.path.exists("results"):
     os.makedirs("results")
 
 ###### PHYSICS SETUP ######
-RESOLUTION = 18 #pixels per meep unit length (1um)
+RESOLUTION = 20 #pixels per meep unit length (1um)
 MAX_RUN_TIME = 1100 #meep units
 WAVELENGTH_MIN_UM = 1.50
 WAVELENGTH_MAX_UM = 1.60
 PML_UM = 1.0 #PML thickness
-BUFFER = 2.0
+BUFFER = 3.0
 DESIGN_WAVELENGTHS_UM = [1.50,1.55,1.60] #wavelengths at which to optimize the device
-DESIGN_REGION_UM = mp.Vector3(2,2,1)
+DESIGN_REGION_UM = mp.Vector3(4,4,1)
 DESIGN_REGION_RESOLUTION = int(2 * RESOLUTION)
 DESIGN_REGION_CENTER = mp.Vector3(0, 0, DESIGN_REGION_UM.z / 2)
 NX_DESIGN_GRID = int(DESIGN_REGION_UM.x * DESIGN_REGION_RESOLUTION) + 1 
@@ -67,7 +67,7 @@ frequency_width = frequency_max - frequency_min
 SOURCE_CENTER = mp.Vector3(0,0,-BUFFER/2)
 SOURCE_SIZE = mp.Vector3(physical_domains_size.x,physical_domains_size.y,0)
 
-NEAR_REGION_MONITOR_CENTER = mp.Vector3(0,0, DESIGN_REGION_UM.z)
+NEAR_REGION_MONITOR_CENTER = mp.Vector3(0,0, DESIGN_REGION_UM.z + BUFFER/2)
 NEAR_REGION_MONITOR_SIZE = mp.Vector3(physical_domains_size.x,physical_domains_size.y,0)
 
 ff_monitor_center = mp.Vector3(0,0,DESIGN_REGION_UM.z + BUFFER)
@@ -366,7 +366,7 @@ def normalization_sim() -> np.ndarray:
         mp.Source(
             src=mp.GaussianSource(
                 frequency=frequency_center, 
-                fwidth=frequency_width/2),
+                fwidth=frequency_width),
             component=mp.Ex,
             center=SOURCE_CENTER,
             size=SOURCE_SIZE,
@@ -408,9 +408,8 @@ def normalization_sim() -> np.ndarray:
 
     norm_near2far = norm_sim.add_near2far(frequencies, *NearRegions)
 
-    #norm_sim.run(until_after_sources=stop_cond)
     norm_sim.run(
-        mp.at_every(10,mp.in_volume(
+        mp.at_every(1,mp.in_volume(
             mp.Volume(center=mp.Vector3(), size=physical_domains_size),
             mp.output_efield_x
         )),
