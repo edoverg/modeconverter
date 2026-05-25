@@ -409,10 +409,10 @@ def normalization_sim() -> np.ndarray:
     norm_near2far = norm_sim.add_near2far(frequencies, *NearRegions)
 
     norm_sim.run(
-        mp.at_every(1,mp.in_volume(
-            mp.Volume(center=mp.Vector3(), size=physical_domains_size),
-            mp.output_efield_x
-        )),
+        #mp.at_every(1,mp.in_volume(
+        #    mp.Volume(center=mp.Vector3(), size=physical_domains_size),
+        #    mp.output_efield_x
+        #)),
         #mp.at_every(20,record_fields),
         until_after_sources=stop_cond
     )
