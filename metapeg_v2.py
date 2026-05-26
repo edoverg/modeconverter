@@ -17,7 +17,7 @@ if not os.path.exists("results"):
     os.makedirs("results")
 
 ###### PHYSICS SETUP ######
-RESOLUTION = 20 #pixels per meep unit length (1um)
+RESOLUTION = 12 #pixels per meep unit length (1um)
 MAX_RUN_TIME = 1100 #meep units
 WAVELENGTH_MIN_UM = 1.50
 WAVELENGTH_MAX_UM = 1.60
@@ -104,7 +104,7 @@ def filter_and_project(
     Returns:
         The flattened filtered/projected design weights
     '''
-
+    print("Inside filter_and_project function...")
     weights_filtered = mpa.conic_filter(
         weights,
         filter_radius_um,
@@ -114,6 +114,7 @@ def filter_and_project(
     )
 
     if sigmoid_bias == 0:
+        print("No projection applied in filter_and_project function, exiting...")
         return weights_filtered.flatten()
     else:
         weights_projected = mpa.tanh_projection(
@@ -121,6 +122,7 @@ def filter_and_project(
             sigmoid_bias,
             sigmoid_threshold,
         )
+        print("Projection applied in filter_and_project function, exiting...")
         return weights_projected.flatten()
     
 def obj_fun(epigraph_and_weights: np.ndarray, grad: np.ndarray)-> float:
@@ -166,22 +168,24 @@ def epigraph_constraint(
         sigmoid_bias: bias parameter for projection.
         use_epsavg: whether to use subpixel smoothing.
     '''
+    print("Inside epigraph_constraint function...")
     epigraph = epigraph_and_weights[0]
     weights = epigraph_and_weights[1:]
 
     obj_val, grad = opt(
         [
             filter_and_project(
-                weights, sigmoid_threshold, 0 if use_epsavg else sigmoid_bias)
+                weights, sigmoid_threshold, 0 if use_epsavg else sigmoid_bias
+            )
         ]
     )
-
+    print("filter_and_project called")
     #in our case there is only one objective function, 
     #which needs to be evaluated at multiple wavelengths.
     #for this reason, obj_val is a 1-element list (to be verified,
     # it might be that the list is directly replaced by the content)
     # that contains an array of objective function values at each wavelength.
-    
+    print("Backpropagating gradients...")
     #for each wavelength, backpropagate
     for k in range(num_wavelengths):
         grad[:,k] = tensor_jacobian_product(filter_and_project, 0)(
@@ -199,6 +203,7 @@ def epigraph_constraint(
     #modify in place the constraint result
     result[:] = np.real(obj_val) - epigraph
 
+    print("Updating history...")
     objfunc_history.append(np.real(obj_val))
     epivar_history.append(epigraph)
 
@@ -207,7 +212,7 @@ def epigraph_constraint(
         f"epigraph: {epigraph:.5f}, obj. func.: {obj_val}, "
         f"epigraph constraint: {str_from_list(result)}"
     )
-
+    print("Finished epigraph_constraint function")
     cur_iter[0] = cur_iter[0] + 1
 
 def line_width_and_spacing_constraint(
@@ -627,7 +632,7 @@ if __name__ == "__main__":
     for sigmoid_bias, max_eval in zip(sigmoid_biases, max_evals):
         print(f"Starting optimization epoch with sigmoid bias {sigmoid_bias} and max evals {max_eval}")
         #the optimizer need to work with the weights and epigraph (+1)
-        solver = nlopt.opt(nlopt.LD_MMA, num_weights + 1)
+        solver = nlopt.opt(nlopt.LD_CCSAQ, num_weights + 1)
         solver.set_lower_bounds(epigraph_and_weights_lower_bound)
         solver.set_upper_bounds(epigraph_and_weights_upper_bound)
         solver.set_min_objective(obj_fun)
@@ -714,11 +719,13 @@ if __name__ == "__main__":
             (1 + fraction_max_epigraph) * max(epigraph_and_weights[0], 
                                                   linewidth_constraint_val)
         print(
-            f"epigraph-calibration:, {sigmoid_bias}, "
+            f"epigraph-calibration:, bias = {sigmoid_bias}, "
             f"{str_from_list(epigraph_initial)}, {epigraph_and_weights[0]}"
         )
 
+        print("Starting optimization...")
         epigraph_and_weights[:] = solver.optimize(epigraph_and_weights)
+        print("Optimization completed")
 
         optimal_design_weights = filter_and_project(
             epigraph_and_weights[1:],
@@ -746,8 +753,6 @@ if __name__ == "__main__":
                 fmt="%4.2f",
                 delimiter=",",
             )
-        
-
 
     plt.figure()
     plt.subplot(1,2,1)
@@ -759,5 +764,26 @@ if __name__ == "__main__":
     plt.legend()
     plt.savefig("results/optimization_history.pdf")
 
+    saveResults = False
+    if saveResults:
+        np.savez(
+            "optimal_design.npz",
+            RESOLUTION_UM=RESOLUTION,
+            DESIGN_WAVELENGTHS_UM=DESIGN_WAVELENGTHS_UM,
+            BUFFER=BUFFER,
+            PML_UM=PML_UM,
+            DESIGN_REGION_UM=DESIGN_REGION_UM,
+            DESIGN_REGION_RESOLUTION_UM=DESIGN_REGION_RESOLUTION,
+            NX_DESIGN_GRID=NX_DESIGN_GRID,
+            NY_DESIGN_GRID=NY_DESIGN_GRID,
+            MIN_LENGTH_UM=MIN_LENGTH_UM,
+            sigmoid_biases=sigmoid_biases,
+            max_eval=max_eval,
+            objfunc_history=objfunc_history,
+            epivar_history=epivar_history,
+            epigraph_variable=epigraph_and_weights[0],
+            unmapped_design_weights=epigraph_and_weights[1:],
+            optimal_design_weights=optimal_design_weights,
+        )
 
     print("Normalization simulation completed")
