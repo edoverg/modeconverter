@@ -1,5 +1,7 @@
-from typing import List, NamedTuple, Tuple
 
+import faulthandler
+faulthandler.enable()
+from typing import List, NamedTuple, Tuple
 from autograd import numpy as npa, tensor_jacobian_product, grad
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
