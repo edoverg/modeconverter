@@ -19,7 +19,7 @@ if not os.path.exists("results"):
     os.makedirs("results")
 
 ###### PHYSICS SETUP ######
-RESOLUTION = 5 #pixels per meep unit length (1um)
+RESOLUTION = 12 #pixels per meep unit length (1um)
 MAX_RUN_TIME = 400 #meep units
 WAVELENGTH_MIN_UM = 1.50
 WAVELENGTH_MAX_UM = 1.60
