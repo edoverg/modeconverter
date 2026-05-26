@@ -13,13 +13,13 @@ import os
 import xarray as xr
 from PIL import Image
 
-mp.verbosity(2)
+mp.verbosity(0)
 
 if not os.path.exists("results"):
     os.makedirs("results")
 
 ###### PHYSICS SETUP ######
-RESOLUTION = 12 #pixels per meep unit length (1um)
+RESOLUTION = 5 #pixels per meep unit length (1um)
 MAX_RUN_TIME = 400 #meep units
 WAVELENGTH_MIN_UM = 1.50
 WAVELENGTH_MAX_UM = 1.60
@@ -104,16 +104,23 @@ def filter_and_project(
         sigmoid_threshold: erosion/dilation parameter for projection
         sigmoid_bias: bias parameter for the projection. 0 is no projection
     Returns:
-        The flattened filtered/projected design weights
+        The flattened (1D) filtered/projected design weights
     '''
+    
     print("Inside filter_and_project function...")
     weights_filtered = mpa.conic_filter(
-        weights,
+        weights.reshape(NX_DESIGN_GRID, NY_DESIGN_GRID),
         filter_radius_um,
         DESIGN_REGION_UM.x,
         DESIGN_REGION_UM.y,
         DESIGN_REGION_RESOLUTION,
     )
+    
+    print("========================")
+    print("weights shape", weights.shape)
+    print("weights_filtered shape",weights_filtered.flatten().shape)
+    print("type of weights", type(weights))
+    print("========================")
 
     if sigmoid_bias == 0:
         print("No projection applied in filter_and_project function, exiting...")
@@ -173,7 +180,9 @@ def epigraph_constraint(
     print("Inside epigraph_constraint function...")
     epigraph = epigraph_and_weights[0]
     weights = epigraph_and_weights[1:]
-
+    print("===========")
+    print("Shape of weights in epigraph_constraint:", weights.shape)
+    print("===========")
     obj_val, grad = opt(
         [
             filter_and_project(
@@ -611,7 +620,7 @@ if __name__ == "__main__":
     
     num_weights = NX_DESIGN_GRID * NY_DESIGN_GRID
 
-    epigraph_and_weights = np.ones(shape=num_weights) * 0.5
+    epigraph_and_weights = np.ones((num_weights,)) * 0.5
     epigraph_and_weights = np.insert(epigraph_and_weights, 0, 1.2) 
 
     weights_lower_bound = np.zeros(num_weights)
