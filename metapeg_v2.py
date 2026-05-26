@@ -13,14 +13,14 @@ import os
 import xarray as xr
 from PIL import Image
 
-mp.verbosity(0)
+mp.verbosity(3)
 
 if not os.path.exists("results"):
     os.makedirs("results")
 
 ###### PHYSICS SETUP ######
 RESOLUTION = 20 #pixels per meep unit length (1um)
-MAX_RUN_TIME = 400 #meep units
+MAX_RUN_TIME = 700 #meep units
 WAVELENGTH_MIN_UM = 1.50
 WAVELENGTH_MAX_UM = 1.60
 PML_UM = 1.0 #PML thickness
@@ -118,7 +118,7 @@ def filter_and_project(
     
     print("========================")
     print("weights shape", weights.shape)
-    print("weights_filtered shape",weights_filtered.flatten().shape)
+    print("weights_filtered shape",weights_filtered.shape)
     print("type of weights", type(weights))
     print("========================")
 
@@ -441,7 +441,7 @@ def normalization_sim() -> np.ndarray:
 
     ref_fields = np.array(
         [norm_sim.get_farfield(norm_near2far, point) for point in ff_points]
-        )
+    )
     
     #select only the Ex component for all frequencies, 
     # which is the one we will optimize for
@@ -588,12 +588,13 @@ def intensity_optimization(
  
         measured_intensity = intensity_from_farfields(FarFields)
         
-        measured_intensity_mean = npa.mean(measured_intensity, axis=0)
+        #measured_intensity_mean = npa.mean(measured_intensity, axis=0)
 
-        norm_measured_intensity = measured_intensity / ref_intensity * target_intensity_mean
-        norm_measured_intensity = npa.clip(norm_measured_intensity, a_min=0, a_max=1)
+        translated_measured_intensity = measured_intensity / npa.mean(ref_intensity,axis=0) * target_intensity_mean
+        
+        translated_measured_intensity = npa.clip(translated_measured_intensity, a_min=0, a_max=1)
 
-        distance = norm_measured_intensity - target_intensity_3d
+        distance = translated_measured_intensity - target_intensity_3d
         
         return npa.power(npa.sum(distance**2, axis=0),0.5)
         
