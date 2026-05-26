@@ -20,7 +20,7 @@ if not os.path.exists("results"):
 
 ###### PHYSICS SETUP ######
 RESOLUTION = 12 #pixels per meep unit length (1um)
-MAX_RUN_TIME = 1100 #meep units
+MAX_RUN_TIME = 400 #meep units
 WAVELENGTH_MIN_UM = 1.50
 WAVELENGTH_MAX_UM = 1.60
 PML_UM = 1.0 #PML thickness
