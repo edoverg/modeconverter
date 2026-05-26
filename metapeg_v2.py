@@ -109,7 +109,7 @@ def filter_and_project(
     
     print("Inside filter_and_project function...")
     weights_filtered = mpa.conic_filter(
-        weights.reshape(NX_DESIGN_GRID, NY_DESIGN_GRID),
+        weights.reshape(-1, NY_DESIGN_GRID), #row major mapping 
         filter_radius_um,
         DESIGN_REGION_UM.x,
         DESIGN_REGION_UM.y,
@@ -127,7 +127,7 @@ def filter_and_project(
         return weights_filtered.flatten()
     else:
         weights_projected = mpa.tanh_projection(
-            weights_filtered.reshape(NX_DESIGN_GRID,NY_DESIGN_GRID),
+            weights_filtered.reshape(-1,NY_DESIGN_GRID),
             sigmoid_bias,
             sigmoid_threshold,
         )
@@ -253,7 +253,7 @@ def line_width_and_spacing_constraint(
     gradient[:,0] = -a1
 
     filter_func = lambda a: mpa.conic_filter(
-            a.reshape(NX_DESIGN_GRID,NY_DESIGN_GRID),
+            a.reshape(-1,NY_DESIGN_GRID),
             filter_radius_um,
             DESIGN_REGION_UM.x,
             DESIGN_REGION_UM.y,
@@ -261,7 +261,7 @@ def line_width_and_spacing_constraint(
         )
     
     threshold_func = lambda a: mpa.tanh_projection(
-            a.reshape(NX_DESIGN_GRID,NY_DESIGN_GRID),
+            a.reshape(-1,NY_DESIGN_GRID),
             sigmoid_bias,
             SIGMOID_THRESHOLD_INTRINSIC,
     )
@@ -742,7 +742,7 @@ if __name__ == "__main__":
             epigraph_and_weights[1:],
             SIGMOID_THRESHOLD_INTRINSIC,
             sigmoid_bias
-        ).reshape(NX_DESIGN_GRID, NY_DESIGN_GRID)
+        ).reshape(-1, NY_DESIGN_GRID)
 
         fig, ax = plt.subplots()
         ax.imshow(
