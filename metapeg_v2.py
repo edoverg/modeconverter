@@ -180,7 +180,7 @@ def epigraph_constraint(
     print("Inside epigraph_constraint function...")
     epigraph = epigraph_and_weights[0]
     weights = epigraph_and_weights[1:]
-    assert np.isnan(weights).any(), "NaN values found in weights in epigraph_constraint function"
+    assert not np.isnan(weights).any(), "NaN values found in weights in epigraph_constraint function"
     print("===========")
     print("Shape of weights in epigraph_constraint:", weights.shape)
     print("===========")
