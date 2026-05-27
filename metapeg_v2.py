@@ -12,7 +12,7 @@ import numpy as np
 import os
 import xarray as xr
 from PIL import Image
-
+import pickle
 mp.verbosity(3)
 
 if not os.path.exists("results"):
@@ -20,7 +20,7 @@ if not os.path.exists("results"):
 
 ###### PHYSICS SETUP ######
 RESOLUTION = 10 #pixels per meep unit length (1um)
-MAX_RUN_TIME = 400 #meep units
+MAX_RUN_TIME = 100 #meep units
 WAVELENGTH_MIN_UM = 1.50
 WAVELENGTH_MAX_UM = 1.60
 PML_UM = 1.0 #PML thickness
@@ -53,7 +53,7 @@ SUBSTRATE_CENTER = mp.Vector3(0, 0, -SUBSTRATE_THICKNESS/2)
 physical_domains_size = mp.Vector3(
     DESIGN_REGION_UM.x + 2*BUFFER,
     DESIGN_REGION_UM.y + 2*BUFFER,
-    DESIGN_REGION_UM.z + 2*BUFFER
+    2*BUFFER
 )
 
 filter_radius_um = mpa.get_conic_radius_from_eta_e(
@@ -65,6 +65,8 @@ frequency_max = 1 / WAVELENGTH_MIN_UM
 frequency_center = 0.5 * (frequency_min + frequency_max)
 wavelength_center = 1 / frequency_center #remember that c = 1 in meep units
 frequency_width = frequency_max - frequency_min
+frequencies = [1/wavelength for wavelength in DESIGN_WAVELENGTHS_UM]
+num_wavelengths = len(DESIGN_WAVELENGTHS_UM)
 
 SOURCE_CENTER = mp.Vector3(0,0,-BUFFER/2)
 SOURCE_SIZE = mp.Vector3(physical_domains_size.x,physical_domains_size.y,0)
@@ -72,17 +74,15 @@ SOURCE_SIZE = mp.Vector3(physical_domains_size.x,physical_domains_size.y,0)
 NEAR_REGION_MONITOR_CENTER = mp.Vector3(0,0, DESIGN_REGION_UM.z + BUFFER/2)
 NEAR_REGION_MONITOR_SIZE = mp.Vector3(physical_domains_size.x,physical_domains_size.y,0)
 
-ff_monitor_center = mp.Vector3(0,0,DESIGN_REGION_UM.z + BUFFER)
-ff_monitor_size = mp.Vector3(DESIGN_REGION_UM.x, DESIGN_REGION_UM.y, 0)
-xs = ys = np.linspace(-ff_monitor_size.x/2, ff_monitor_size.x/2, NX_DESIGN_GRID)
+FF_MONITOR_CENTER = mp.Vector3(0,0,DESIGN_REGION_UM.z + BUFFER)
+FF_MONITOR_SIZE = mp.Vector3(DESIGN_REGION_UM.x, DESIGN_REGION_UM.y, 0)
+xs = ys = np.linspace(-FF_MONITOR_SIZE.x/2, FF_MONITOR_SIZE.x/2, NX_DESIGN_GRID)
 #collection of points in the far-field monitor
-ff_points = [mp.Vector3(x_p,y_p,ff_monitor_center.z) for x_p in xs for y_p in ys] 
+ff_points = [mp.Vector3(x_p,y_p,FF_MONITOR_CENTER.z) for x_p in xs for y_p in ys] 
 
 stop_cond = mp.stop_when_fields_decayed(25, mp.Ex, NEAR_REGION_MONITOR_CENTER, 1e-6)
 
 pml_layers = [mp.PML(PML_UM)]
-frequencies = [1/wavelength for wavelength in DESIGN_WAVELENGTHS_UM]
-num_wavelengths = len(DESIGN_WAVELENGTHS_UM)
 
 view_2D_plane = mp.Volume(
     center=mp.Vector3(0,0,0), 
@@ -115,12 +115,6 @@ def filter_and_project(
         DESIGN_REGION_UM.y,
         DESIGN_REGION_RESOLUTION,
     )
-    
-    print("========================")
-    print("weights shape", weights.shape)
-    print("weights_filtered shape",weights_filtered.shape)
-    print("type of weights", type(weights))
-    print("========================")
 
     if sigmoid_bias == 0:
         print("No projection applied in filter_and_project function, exiting...")
@@ -361,15 +355,6 @@ def intensity_desired_fn_pattern(
 
     return pattern_to_return
 
-
-def record_fields(sim):
-    plt.figure()
-    ax = plt.gca()
-    sim.plot2D(output_plane=view_2D_plane, fields=mp.Ex, ax=ax)
-    plt.savefig(f"results/fields_t{sim.timestep()}.pdf")
-    plt.close()
-    return True
-
 def normalization_sim() -> np.ndarray:
     ''' Computes the Far-Field pattern at the monitor location and
     without the design region. Used for normalization purposes. 
@@ -408,7 +393,6 @@ def normalization_sim() -> np.ndarray:
         geometry=geometry,
         boundary_layers=pml_layers,
         k_point=mp.Vector3(),
-        split_chunks_evenly=False,
     )
 
     plt.figure()
@@ -433,12 +417,11 @@ def normalization_sim() -> np.ndarray:
         #mp.at_every(20,record_fields),
         until_after_sources=stop_cond
     )
-    #make a plot of the fields
+    #make a plot of the fields when simulation finished
     plt.figure()
     ax = plt.gca()
     norm_sim.plot2D(output_plane=view_2D_plane, fields=mp.Ex, ax=ax)
-    plt.savefig("results/NORM_FIELDS.pdf")
-
+    plt.savefig("results/fields_after_norm_sim.pdf")
 
     ref_fields = np.array(
         [norm_sim.get_farfield(norm_near2far, point) for point in ff_points]
@@ -552,11 +535,6 @@ def intensity_optimization(
         k_point=mp.Vector3(),
     )
 
-    plt.figure()
-    ax = plt.gca()
-    sim.plot2D(output_plane=view_2D_plane,show_monitors=True,ax=ax)
-    plt.savefig("results/optimization_sim_setup.pdf")
-
     NearRegions = [
         mp.Near2FarRegion(
             center=NEAR_REGION_MONITOR_CENTER,
@@ -611,7 +589,7 @@ def intensity_optimization(
     plt.figure()
     ax = plt.gca()
     opt.plot2D(True,output_plane=view_2D_plane, ax=ax)
-    plt.savefig("results/OPT_PROB_SETUP.pdf")
+    plt.savefig("results/optimization_problem_setup.pdf")
     
     return opt
 
@@ -635,15 +613,17 @@ if __name__ == "__main__":
 
     sigmoid_bias_threshold = 64
 
-    sigmoid_biases = [8, 16, 32, 64, 128, 256]
+    #sigmoid_biases = [8, 16, 32, 64, 128, 256]
+    sigmoid_biases = [8, 16]
     #max_evals = [80, 80, 100, 120, 120, 100]
-    max_evals = [50, 50, 60, 70, 70, 60]
+    #max_evals = [10, 7, 7]
+    max_evals = [1, 1]
     epigraph_tolerance = np.array([1e-4]*num_wavelengths)
     tolerance_width_and_spacing = np.array([1e-8]*2)
 
     for sigmoid_bias, max_eval in zip(sigmoid_biases, max_evals):
         print(f"Starting optimization epoch with sigmoid bias {sigmoid_bias} and max evals {max_eval}")
-        #the optimizer need to work with the weights and epigraph (+1)
+        #the optimizer needs to work with the weights and epigraph (+1)
         solver = nlopt.opt(nlopt.LD_CCSAQ, num_weights + 1)
         solver.set_lower_bounds(epigraph_and_weights_lower_bound)
         solver.set_upper_bounds(epigraph_and_weights_upper_bound)
@@ -673,11 +653,6 @@ if __name__ == "__main__":
             use_epsavg=use_epsavg,
             sigmoid_bias=sigmoid_bias,
         )
-
-        plt.figure()
-        ax = plt.gca()
-        opt.plot2D(True,output_plane=view_2D_plane, ax=ax)
-        plt.savefig(f"results/optimization_problem_geometry.pdf")
 
         #the minimum linewidth and spacing constraint
         #is activated only in the last epoch. This is done
@@ -776,26 +751,67 @@ if __name__ == "__main__":
     plt.legend()
     plt.savefig("results/optimization_history.pdf")
 
-    saveResults = False
+    saveResults = True
     if saveResults:
-        np.savez(
-            "optimal_design.npz",
-            RESOLUTION_UM=RESOLUTION,
-            DESIGN_WAVELENGTHS_UM=DESIGN_WAVELENGTHS_UM,
-            BUFFER=BUFFER,
-            PML_UM=PML_UM,
-            DESIGN_REGION_UM=DESIGN_REGION_UM,
-            DESIGN_REGION_RESOLUTION_UM=DESIGN_REGION_RESOLUTION,
-            NX_DESIGN_GRID=NX_DESIGN_GRID,
-            NY_DESIGN_GRID=NY_DESIGN_GRID,
-            MIN_LENGTH_UM=MIN_LENGTH_UM,
-            sigmoid_biases=sigmoid_biases,
-            max_eval=max_eval,
-            objfunc_history=objfunc_history,
-            epivar_history=epivar_history,
-            epigraph_variable=epigraph_and_weights[0],
-            unmapped_design_weights=epigraph_and_weights[1:],
-            optimal_design_weights=optimal_design_weights,
-        )
+        with open('results/optimal_design.pkl', 'wb') as f:
+            pickle.dump({
+                'RESOLUTION': RESOLUTION,
+                'MAX_RUN_TIME': MAX_RUN_TIME,
+                'WAVELENGTH_MIN_UM': WAVELENGTH_MIN_UM,
+                'WAVELENGTH_MAX_UM': WAVELENGTH_MAX_UM,
+                'PML_UM': PML_UM,
+                'BUFFER': BUFFER,
+                'DESIGN_WAVELENGTHS_UM': DESIGN_WAVELENGTHS_UM,
+                'DESIGN_REGION_UM': DESIGN_REGION_UM,
+                'DESIGN_REGION_RESOLUTION': DESIGN_REGION_RESOLUTION,
+                'DESIGN_REGION_CENTER': DESIGN_REGION_CENTER,
+                'NX_DESIGN_GRID': NX_DESIGN_GRID,
+                'NY_DESIGN_GRID': NY_DESIGN_GRID,
+                'MIN_LENGTH_UM': MIN_LENGTH_UM,
+                'SILICON': SILICON,
+                'SILICON_DIOXIDE': SILICON_DIOXIDE,
+                'AIR': AIR,
+
+                'SIGMOID_THRESHOLD_INTRINSIC': SIGMOID_THRESHOLD_INTRINSIC,
+                'SIGMOID_THRESHOLD_EROSION': SIGMOID_THRESHOLD_EROSION,
+                'SIGMOID_THRESHOLD_DILATION': SIGMOID_THRESHOLD_DILATION,
+                
+                'cell_um': cell_um,
+
+                'SUBSTRATE_THICKNESS': SUBSTRATE_THICKNESS,
+                'SUBSTRATE_SIZE': SUBSTRATE_SIZE,
+                'SUBSTRATE_CENTER': SUBSTRATE_CENTER,
+                
+                'physical_domains_size': physical_domains_size,
+                'filter_radius_um': filter_radius_um,
+
+                'frequency_min': frequency_min,
+                'frequency_max': frequency_max,
+                'frequency_center': frequency_center,
+                'wavelength_center': wavelength_center,
+                'frequency_width': frequency_width,
+                'frequencies': frequencies,
+                'num_wavelengths': num_wavelengths,
+
+                'SOURCE_CENTER': SOURCE_CENTER,
+                'SOURCE_SIZE': SOURCE_SIZE,
+                
+                'NEAR_REGION_MONITOR_CENTER': NEAR_REGION_MONITOR_CENTER,
+                'NEAR_REGION_MONITOR_SIZE': NEAR_REGION_MONITOR_SIZE,
+                
+                'FF_MONITOR_CENTER': FF_MONITOR_CENTER,
+                'FF_MONITOR_SIZE': FF_MONITOR_SIZE,
+                'xs': xs,
+                'ys': ys,
+                'ff_points': ff_points,
+                
+                'sigmoid_biases': sigmoid_biases,
+                'max_eval': max_eval,
+                'objfunc_history': objfunc_history,
+                'epivar_history': epivar_history,
+                'epigraph_variable': epigraph_and_weights[0],
+                'unmapped_design_weights': epigraph_and_weights[1:],
+                'optimal_design_weights': optimal_design_weights,
+            }, f)
 
     print("Normalization simulation completed")
