@@ -25,7 +25,7 @@ WAVELENGTH_MIN_UM = 1.50
 WAVELENGTH_MAX_UM = 1.60
 PML_UM = 1.0 #PML thickness
 BUFFER = 3.0
-DESIGN_WAVELENGTHS_UM = [1.50,1.55,1.60] #wavelengths at which to optimize the device
+DESIGN_WAVELENGTHS_UM = (1.50,1.55,1.60) #wavelengths at which to optimize the device
 DESIGN_REGION_UM = mp.Vector3(4,4,1)
 DESIGN_REGION_RESOLUTION = int(RESOLUTION)
 DESIGN_REGION_CENTER = mp.Vector3(0, 0, DESIGN_REGION_UM.z / 2)
@@ -550,7 +550,6 @@ def intensity_optimization(
         geometry=geometry,
         boundary_layers=pml_layers,
         k_point=mp.Vector3(),
-        split_chunks_evenly=False,
     )
 
     plt.figure()
@@ -729,8 +728,8 @@ if __name__ == "__main__":
         fraction_max_epigraph = 0.05
         if sigmoid_bias == sigmoid_biases[-1]:#if last epoch
             epigraph_and_weights[0] = \
-            (1 + fraction_max_epigraph) * max(epigraph_and_weights[0], 
-                                                  linewidth_constraint_val)
+            (1 + fraction_max_epigraph) * max(
+                epigraph_and_weights[0], linewidth_constraint_val)
         print(
             f"epigraph-calibration:, bias = {sigmoid_bias}, "
             f"{str_from_list(epigraph_initial)}, {epigraph_and_weights[0]}"
