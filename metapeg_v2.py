@@ -614,10 +614,10 @@ if __name__ == "__main__":
     sigmoid_bias_threshold = 64
 
     #sigmoid_biases = [8, 16, 32, 64, 128, 256]
-    sigmoid_biases = [8, 16]
+    sigmoid_biases = [8, 16, 32]
     #max_evals = [80, 80, 100, 120, 120, 100]
-    #max_evals = [10, 7, 7]
-    max_evals = [1, 1]
+    max_evals = [10, 7, 7]
+    #max_evals = [1, 1]
     epigraph_tolerance = np.array([1e-4]*num_wavelengths)
     tolerance_width_and_spacing = np.array([1e-8]*2)
 
