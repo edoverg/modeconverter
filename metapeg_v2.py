@@ -15,8 +15,9 @@ from PIL import Image
 import pickle
 mp.verbosity(3)
 
-if not os.path.exists("results"):
-    os.makedirs("results")
+if mp.am_master():
+    if not os.path.exists("results"):
+        os.makedirs("results")
 
 ###### PHYSICS SETUP ######
 RESOLUTION = 20 #pixels per meep unit length (1um)
@@ -423,7 +424,7 @@ def normalization_sim() -> np.ndarray:
     #norm_sim.plot2D(output_plane=view_2D_plane, fields=mp.Ex, ax=ax)
     #plt.savefig("results/fields_after_norm_sim.pdf")
     #plt.close()
-    
+
     ref_fields = np.array(
         [norm_sim.get_farfield(norm_near2far, point) for point in ff_points]
     )
