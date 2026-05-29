@@ -395,11 +395,11 @@ def normalization_sim() -> np.ndarray:
         k_point=mp.Vector3(),
     )
 
-    plt.figure()
-    ax = plt.gca()
-    norm_sim.plot2D(output_plane=view_2D_plane, ax=ax)
-    plt.savefig("results/normalization_sim_setup.pdf")
-    
+    #plt.figure()
+    #ax = plt.gca()
+    #norm_sim.plot2D(output_plane=view_2D_plane, ax=ax)
+    #plt.savefig("results/normalization_sim_setup.pdf")
+    #plt.close()
 
     NearRegions = [mp.Near2FarRegion(
         center=NEAR_REGION_MONITOR_CENTER,
@@ -418,11 +418,12 @@ def normalization_sim() -> np.ndarray:
         until_after_sources=stop_cond
     )
     #make a plot of the fields when simulation finished
-    plt.figure()
-    ax = plt.gca()
-    norm_sim.plot2D(output_plane=view_2D_plane, fields=mp.Ex, ax=ax)
-    plt.savefig("results/fields_after_norm_sim.pdf")
-
+    #plt.figure()
+    #ax = plt.gca()
+    #norm_sim.plot2D(output_plane=view_2D_plane, fields=mp.Ex, ax=ax)
+    #plt.savefig("results/fields_after_norm_sim.pdf")
+    #plt.close()
+    
     ref_fields = np.array(
         [norm_sim.get_farfield(norm_near2far, point) for point in ff_points]
     )
@@ -615,9 +616,9 @@ if __name__ == "__main__":
 
     #sigmoid_biases = [8, 16, 32, 64, 128, 256]
     sigmoid_biases = [8, 16, 32]
-    #max_evals = [80, 80, 100, 120, 120, 100]
-    max_evals = [10, 7, 7]
-    #max_evals = [1, 1]
+    #max_evals = [48, 48, 60, 60, 60, 60]
+    max_evals = [48, 48, 60]
+    
     epigraph_tolerance = np.array([1e-4]*num_wavelengths)
     tolerance_width_and_spacing = np.array([1e-8]*2)
 
@@ -743,9 +744,11 @@ if __name__ == "__main__":
 
     plt.figure()
     plt.subplot(1,2,1)
-    plt.plot(objfunc_history, label="Objective function value")
+    plt.plot(objfunc_history[:,0], label="f1 - 1.50 um")
+    plt.plot(objfunc_history[:,1], label="f2 - 1.55 um")
+    plt.plot(objfunc_history[:,2], label="f3 - 1.60 um")
     plt.subplot(1,2,2)
-    plt.plot(epivar_history, label="Epigraph variable value")
+    plt.plot(epivar_history, label="Epigraph")
     plt.xlabel("Iteration")
     plt.ylabel("Value")
     plt.legend()
@@ -814,4 +817,4 @@ if __name__ == "__main__":
                 'optimal_design_weights': optimal_design_weights,
             }, f)
 
-    print("Normalization simulation completed")
+    print("Simulation completed")
