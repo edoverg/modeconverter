@@ -22,8 +22,8 @@ if mp.am_master():
         os.makedirs("results")
 
 ###### PHYSICS SETUP ######
-RESOLUTION = 5 #pixels per meep unit length (1um)
-MAX_RUN_TIME = 70 #meep units
+RESOLUTION = 20 #pixels per meep unit length (1um)
+MAX_RUN_TIME = 700 #meep units
 WAVELENGTH_MIN_UM = 1.50
 WAVELENGTH_MAX_UM = 1.60
 PML_UM = 1.0 #PML thickness
