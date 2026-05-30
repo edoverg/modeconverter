@@ -1,5 +1,3 @@
-#this code implements metapeg_v2 but without imposing the binarization
-#of the design variables. This is useful to test the objective function alone
 
 import faulthandler
 faulthandler.enable()
@@ -39,6 +37,10 @@ SILICON = mp.Medium(index = 3.5)
 SILICON_DIOXIDE = mp.Medium(index = 1.5)
 AIR = mp.Medium(index = 1.0)
 
+SIGMOID_THRESHOLD_INTRINSIC = 0.5
+SIGMOID_THRESHOLD_EROSION = 0.75
+SIGMOID_THRESHOLD_DILATION = 1 - SIGMOID_THRESHOLD_EROSION
+
 cell_um = mp.Vector3(
     DESIGN_REGION_UM.x + 2*BUFFER + 2*PML_UM,
     DESIGN_REGION_UM.y + 2*BUFFER + 2*PML_UM,
@@ -53,6 +55,10 @@ physical_domains_size = mp.Vector3(
     DESIGN_REGION_UM.x + 2*BUFFER,
     DESIGN_REGION_UM.y + 2*BUFFER,
     2*BUFFER
+)
+
+filter_radius_um = mpa.get_conic_radius_from_eta_e(
+    MIN_LENGTH_UM, SIGMOID_THRESHOLD_EROSION
 )
 
 frequency_min = 1 / WAVELENGTH_MAX_UM
@@ -87,6 +93,42 @@ view_2D_plane = mp.Volume(
 def str_from_list(list_: List[float]) -> str:
     return "[" + ", ".join(f"{val:.4f}" for val in list_) + "]"
 
+def filter_and_project(
+    weights: np.ndarray,
+    sigmoid_threshold: float,
+    sigmoid_bias: float
+) -> np.ndarray:
+    '''Function to filter and project design variables. Differentiable by autograd
+    
+    Args:
+        weights: design weights as a flattened (1D) array
+        sigmoid_threshold: erosion/dilation parameter for projection
+        sigmoid_bias: bias parameter for the projection. 0 is no projection
+    Returns:
+        The flattened (1D) filtered/projected design weights
+    '''
+    
+    print("Inside filter_and_project function...")
+    weights_filtered = mpa.conic_filter(
+        weights.reshape(-1, NY_DESIGN_GRID), #row major mapping 
+        filter_radius_um,
+        DESIGN_REGION_UM.x,
+        DESIGN_REGION_UM.y,
+        DESIGN_REGION_RESOLUTION,
+    )
+
+    if sigmoid_bias == 0:
+        print("No projection applied in filter_and_project function, exiting...")
+        return weights_filtered.flatten()
+    else:
+        weights_projected = mpa.tanh_projection(
+            weights_filtered.reshape(-1,NY_DESIGN_GRID),
+            sigmoid_bias,
+            sigmoid_threshold,
+        )
+        print("Projection applied in filter_and_project function, exiting...")
+        return weights_projected.flatten()
+    
 def obj_fun(epigraph_and_weights: np.ndarray, grad: np.ndarray)-> float:
     '''Objective function for the epigraph formulation
     
@@ -110,6 +152,9 @@ def epigraph_constraint(
         result: np.ndarray,
         epigraph_and_weights: np.ndarray,
         gradient: np.ndarray,
+        sigmoid_threshold: float,
+        sigmoid_bias: float,
+        use_epsavg: bool,
 ) -> None:
     '''Constraint function for the epigraph formulation
 
@@ -136,9 +181,26 @@ def epigraph_constraint(
     print("===========")
     obj_val, grad = opt(
         [
-            weights
+            filter_and_project(
+                weights, sigmoid_threshold, 0 if use_epsavg else sigmoid_bias
+            )
         ]
     )
+    print("filter_and_project called")
+    #in our case there is only one objective function, 
+    #which needs to be evaluated at multiple wavelengths.
+    #for this reason, obj_val is a 1-element list (to be verified,
+    # it might be that the list is directly replaced by the content)
+    # that contains an array of objective function values at each wavelength.
+    print("Backpropagating gradients...")
+    #for each wavelength, backpropagate
+    for k in range(num_wavelengths):
+        grad[:,k] = tensor_jacobian_product(filter_and_project, 0)(
+            weights,
+            sigmoid_threshold,
+            sigmoid_bias,
+            grad[:,k],
+        )
 
     #modify in place the gradient result
     if gradient.size > 0:
@@ -153,13 +215,91 @@ def epigraph_constraint(
     epivar_history.append(epigraph)
 
     print(
-        f"iteration:, {cur_iter[0]:3d}, "
+        f"iteration:, {cur_iter[0]:3d}, sigmoid_bias: {sigmoid_bias:2d}, "
         f"epigraph: {epigraph:.5f}, obj. func.: {obj_val}, "
         f"epigraph constraint: {str_from_list(result)}"
     )
-
     print("Finished epigraph_constraint function")
     cur_iter[0] = cur_iter[0] + 1
+
+def line_width_and_spacing_constraint(
+        result: np.ndarray,
+        epigraph_and_weights: np.ndarray,
+        gradient: np.ndarray,
+        sigmoid_bias: float,
+) -> float:
+    '''Constraint function for minimum line width and spacing
+
+    Args: 
+        result: evaluation of this constraint function, modified in place
+        epigraph_and_weights: 1D array of epigraph (first element) 
+            and design weights (other elements)
+        gradient: the Jacobian matrix, modified in place
+        sigmoid_bias: bias parameter for projection
+    
+    Returns:
+        The constraint value result
+    '''
+
+    epigraph = epigraph_and_weights[0]
+    weights = epigraph_and_weights[1:]
+
+    a1 = 1e-3
+    b1 = 0
+    gradient[:,0] = -a1
+
+    filter_func = lambda a: mpa.conic_filter(
+            a.reshape(-1,NY_DESIGN_GRID),
+            filter_radius_um,
+            DESIGN_REGION_UM.x,
+            DESIGN_REGION_UM.y,
+            DESIGN_REGION_RESOLUTION,
+        )
+    
+    threshold_func = lambda a: mpa.tanh_projection(
+            a.reshape(-1,NY_DESIGN_GRID),
+            sigmoid_bias,
+            SIGMOID_THRESHOLD_INTRINSIC,
+    )
+
+    c0 = 1e7 * (filter_radius_um * 1 / RESOLUTION) ** 4
+
+    #constraints as lambda functions
+    M1 = lambda a: mpa.constraint_solid(
+        a,
+        c0,
+        SIGMOID_THRESHOLD_EROSION,
+        filter_func,
+        threshold_func,
+        1
+    )
+
+    M2 = lambda a: mpa.constraint_void(
+        a,
+        c0,
+        SIGMOID_THRESHOLD_DILATION,
+        filter_func,
+        threshold_func,
+        1
+    )
+
+    #gradients of the constraints w.r.t design parameters
+    g1 = grad(M1)(weights)
+    g2 = grad(M2)(weights)
+
+    result[0] = M1(weights) - a1 * epigraph - b1
+    result[1] = M2(weights) - a1 * epigraph - b1
+
+    gradient[0, 1:] = g1.flatten()
+    gradient[1, 1:] = g2.flatten()
+
+    #these are the epigraph values for the constraints
+    t1 = (M1(weights) - b1) / a1
+    t2 = (M2(weights) - b1) / a1
+
+    print(f"line_width_and_spacing_constraint:, {result[0]}, {result[1]}, {t1}, {t2}")
+
+    return max(t1, t2)
 
 def get_pattern() -> np.ndarray:
     '''Imports the intensity pattern from file'''
@@ -229,8 +369,7 @@ def normalization_sim() -> np.ndarray:
         mp.Source(
             src=mp.GaussianSource(
                 frequency=frequency_center, 
-                fwidth=frequency_width
-            ),
+                fwidth=frequency_width),
             component=mp.Ex,
             center=SOURCE_CENTER,
             size=SOURCE_SIZE,
@@ -243,7 +382,7 @@ def normalization_sim() -> np.ndarray:
         material = SILICON_DIOXIDE,
     )
 
-    geometry = [
+    geometry = [#combine geometries
         substrate_block,
     ]
 
@@ -279,12 +418,18 @@ def normalization_sim() -> np.ndarray:
         #mp.at_every(20,record_fields),
         until_after_sources=stop_cond
     )
+    #make a plot of the fields when simulation finished
+    #plt.figure()
+    #ax = plt.gca()
+    #norm_sim.plot2D(output_plane=view_2D_plane, fields=mp.Ex, ax=ax)
+    #plt.savefig("results/fields_after_norm_sim.pdf")
+    #plt.close()
 
     ref_fields = np.array(
         [norm_sim.get_farfield(norm_near2far, point) for point in ff_points]
     )
     
-    #select only the (dft) Ex component for all frequencies, 
+    #select only the Ex component for all frequencies, 
     # which is the one we will optimize for
     ref_fields_x_f1 = ref_fields[:,0]
     ref_fields_x_f2 = ref_fields[:,6]
@@ -292,32 +437,8 @@ def normalization_sim() -> np.ndarray:
     #concatenate the Ex component for all frequencies into a single array
     #the rows are the points, the columns are the frequencies
     ref_fields_x = npa.stack((ref_fields_x_f1, ref_fields_x_f2, ref_fields_x_f3), axis=-1)
-
+    
     ref_intensity_x = npa.power(npa.abs(ref_fields_x),2)
-
-    #make a plot of the fields when simulation finished
-    plt.figure()
-    plt.subplot(1,3,1)
-    plt.imshow(ref_intensity_x[:,0].reshape(NX_DESIGN_GRID, NY_DESIGN_GRID), extent=(min(xs), max(xs), min(ys), max(ys)), origin='lower')
-    plt.title("Reference Intensity - 1.50 um")
-    plt.xlabel("x (um)")
-    plt.ylabel("y (um)")
-    plt.colorbar(label='Intensity (a.u.)')
-    plt.subplot(1,3,2)
-    plt.imshow(ref_intensity_x[:,1].reshape(NX_DESIGN_GRID, NY_DESIGN_GRID), extent=(min(xs), max(xs), min(ys), max(ys)), origin='lower')
-    plt.title("Reference Intensity - 1.55 um")
-    plt.xlabel("x (um)")        
-    plt.ylabel("y (um)")
-    plt.colorbar(label='Intensity (a.u.)')
-    plt.subplot(1,3,3)
-    plt.imshow(ref_intensity_x[:,2].reshape(NX_DESIGN_GRID, NY_DESIGN_GRID), extent=(min(xs), max(xs), min(ys), max(ys)), origin='lower')
-    plt.title("Reference Intensity - 1.60 um")
-    plt.xlabel("x (um)")
-    plt.ylabel("y (um)")
-    plt.colorbar(label='Intensity (a.u.)')
-    plt.savefig("results/far_field_intensity_norm_sim.pdf")
-    plt.close()
-
     return ref_intensity_x
     
 def intensity_from_farfields(FarFields) -> np.ndarray:
@@ -349,6 +470,9 @@ def intensity_from_farfields(FarFields) -> np.ndarray:
 
 def intensity_optimization(
         ref_intensity: np.ndarray,
+        use_damping:bool,
+        use_epsavg: bool,
+        sigmoid_bias: float,
 )-> mpa.OptimizationProblem:
     '''Sets up the optimization problem for the intensity pattern matching
 
@@ -365,6 +489,9 @@ def intensity_optimization(
         medium1 = AIR,
         medium2 = SILICON,
         weights = np.ones((NX_DESIGN_GRID, NY_DESIGN_GRID)),
+        beta = sigmoid_bias if use_epsavg else 0,
+        do_averaging = True if use_epsavg else False,
+        damping = 0.02*2*np.pi*frequency_center if use_damping else 0,
     )
 
     matgrid_region = mpa.DesignRegion(
@@ -490,13 +617,18 @@ if __name__ == "__main__":
     epivar_history = []
     cur_iter = [0]
 
+    sigmoid_bias_threshold = 16
+
+    #sigmoid_biases = [8, 16, 32, 64, 128, 256]
+    sigmoid_biases = [8, 8, 8, 8, 8, 16]
     #max_evals = [48, 48, 60, 60, 60, 60]
-    max_evals = [5]*9
+    max_evals = [8, 8, 8, 8, 8, 24]
     
     epigraph_tolerance = np.array([1e-4]*num_wavelengths)
+    tolerance_width_and_spacing = np.array([1e-8]*2)
 
-    for epoch, max_eval in enumerate(max_evals):
-        print(f"Starting optimization epoch {epoch} with max eval {max_eval}")
+    for sigmoid_bias, max_eval in zip(sigmoid_biases, max_evals):
+        print(f"Starting optimization epoch with sigmoid bias {sigmoid_bias} and max evals {max_eval}")
         #the optimizer needs to work with the weights and epigraph (+1)
         solver = nlopt.opt(nlopt.LD_CCSAQ, num_weights + 1)
         solver.set_lower_bounds(epigraph_and_weights_lower_bound)
@@ -508,15 +640,50 @@ if __name__ == "__main__":
             lambda result_, epigraph_and_weights_, grad_: epigraph_constraint(
                 result_, 
                 epigraph_and_weights_, 
-                grad_,
+                grad_, 
+                SIGMOID_THRESHOLD_INTRINSIC, 
+                sigmoid_bias, 
+                use_epsavg=False if sigmoid_bias < sigmoid_bias_threshold else True,
             ),
             epigraph_tolerance,
         )
         solver.set_param("verbosity",1)
+        if sigmoid_bias < sigmoid_bias_threshold:
+            use_epsavg = False
+        else:
+            use_epsavg = True
         
         opt = intensity_optimization(
             ref_intensity,
+            use_damping=True,
+            use_epsavg=use_epsavg,
+            sigmoid_bias=sigmoid_bias,
         )
+
+        #the minimum linewidth and spacing constraint
+        #is activated only in the last epoch. This is done
+        #by adding the corresponding constraints to the same solver object.
+        #constraints are added as lambda functions, which
+        #are called directly by the nlopt solver.
+        if sigmoid_bias == sigmoid_biases[-1]: #if we are at the last sigmoid bias...
+            line_width_and_spacing = np.zeros(2)
+            grad_line_width_and_spacing = np.zeros((2, num_weights + 1))
+            #compute the value of the costraints at this time
+            linewidth_constraint_val = line_width_and_spacing_constraint(
+                line_width_and_spacing,
+                epigraph_and_weights,
+                grad_line_width_and_spacing,
+                sigmoid_bias,
+            )
+            solver.add_inequality_mconstraint(
+                lambda result_, epigraph_and_weights_, grad_: line_width_and_spacing_constraint(
+                    result_,
+                    epigraph_and_weights_,
+                    grad_,
+                    sigmoid_bias,
+                ),
+                tolerance_width_and_spacing,
+            )
 
         #execute a SINGLE forward run before the start of each epoch and
         #manually set the initial epigraph variable to slightly larger
@@ -527,7 +694,11 @@ if __name__ == "__main__":
         print("Calibrating epigraph variable before starting optimization...")
         epigraph_initial, empty_grads = opt(
             [
-                epigraph_and_weights[1:], 
+                filter_and_project(
+                    epigraph_and_weights[1:], 
+                    SIGMOID_THRESHOLD_INTRINSIC,
+                    sigmoid_bias if sigmoid_bias < sigmoid_bias_threshold else 0,
+                ),
             ],
             need_gradient=False,
         )
@@ -535,8 +706,13 @@ if __name__ == "__main__":
         #at each wavelength in the simulation. At each epoch,
         #we set the initial epigraph variable taking the max of the objective functions
         epigraph_and_weights[0] = np.max(epigraph_initial)
+        fraction_max_epigraph = 0.05
+        if sigmoid_bias == sigmoid_biases[-1]:#if last epoch
+            epigraph_and_weights[0] = \
+            (1 + fraction_max_epigraph) * max(
+                epigraph_and_weights[0], linewidth_constraint_val)
         print(
-            f"epigraph-calibration: "
+            f"epigraph-calibration:, bias = {sigmoid_bias}, "
             f"{str_from_list(epigraph_initial)}, {epigraph_and_weights[0]}"
         )
 
@@ -544,7 +720,11 @@ if __name__ == "__main__":
         epigraph_and_weights[:] = solver.optimize(epigraph_and_weights)
         print("Optimization completed")
 
-        optimal_design_weights = epigraph_and_weights[1:].reshape(-1, NY_DESIGN_GRID)
+        optimal_design_weights = filter_and_project(
+            epigraph_and_weights[1:],
+            SIGMOID_THRESHOLD_INTRINSIC,
+            sigmoid_bias
+        ).reshape(-1, NY_DESIGN_GRID)
 
         fig, ax = plt.subplots()
         ax.imshow(
@@ -555,13 +735,13 @@ if __name__ == "__main__":
         ax.set_axis_off()
         if mp.am_master():
             fig.savefig(
-                f"naive_design_epoch_{epoch}.png",
+                f"optimal_design_beta{sigmoid_bias}.png",
                 dpi=150,
                 bbox_inches="tight",
             )
             # Save the final (unmapped) design as a 2D array in CSV format
             np.savetxt(
-                f"naive_design_weights_epoch_{epoch}.csv",
+                f"unmapped_design_weights_beta{sigmoid_bias}.csv",
                 epigraph_and_weights[1:].reshape(NX_DESIGN_GRID, NY_DESIGN_GRID),
                 fmt="%4.2f",
                 delimiter=",",
@@ -569,19 +749,16 @@ if __name__ == "__main__":
 
             plt.figure()
             plt.subplot(1,2,1)
-            
-            line1,line2,line3, = plt.plot(objfunc_history)
-            plt.xlabel("Iteration")
-            plt.ylabel("Value")
-            plt.legend([line1, line2, line3], ["Obj. func. - 1.50 um", "Obj. func. - 1.55 um", "Obj. func. - 1.60 um"])
-            
+            plt.plot(objfunc_history[:,0], label="f1 - 1.50 um")
+            plt.plot(objfunc_history[:,1], label="f2 - 1.55 um")
+            plt.plot(objfunc_history[:,2], label="f3 - 1.60 um")
             plt.subplot(1,2,2)
             plt.plot(epivar_history, label="Epigraph")
             plt.xlabel("Iteration")
             plt.ylabel("Value")
             plt.legend()
-
-            plt.savefig(f"results/optimization_history_epoch_{epoch}.pdf")
+            plt.savefig("results/optimization_history.pdf")
+            plt.close()
 
     saveResults = True
     if saveResults:
@@ -603,6 +780,10 @@ if __name__ == "__main__":
                 'SILICON': SILICON,
                 'SILICON_DIOXIDE': SILICON_DIOXIDE,
                 'AIR': AIR,
+
+                'SIGMOID_THRESHOLD_INTRINSIC': SIGMOID_THRESHOLD_INTRINSIC,
+                'SIGMOID_THRESHOLD_EROSION': SIGMOID_THRESHOLD_EROSION,
+                'SIGMOID_THRESHOLD_DILATION': SIGMOID_THRESHOLD_DILATION,
                 
                 'cell_um': cell_um,
 
@@ -611,6 +792,7 @@ if __name__ == "__main__":
                 'SUBSTRATE_CENTER': SUBSTRATE_CENTER,
                 
                 'physical_domains_size': physical_domains_size,
+                'filter_radius_um': filter_radius_um,
 
                 'frequency_min': frequency_min,
                 'frequency_max': frequency_max,
@@ -632,7 +814,7 @@ if __name__ == "__main__":
                 'ys': ys,
                 'ff_points': ff_points,
                 
-
+                'sigmoid_biases': sigmoid_biases,
                 'max_eval': max_eval,
                 'objfunc_history': objfunc_history,
                 'epivar_history': epivar_history,
