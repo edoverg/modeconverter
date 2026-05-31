@@ -749,15 +749,16 @@ if __name__ == "__main__":
 
             plt.figure()
             plt.subplot(1,2,1)
-            plt.plot(objfunc_history[:,0], label="f1 - 1.50 um")
-            plt.plot(objfunc_history[:,1], label="f2 - 1.55 um")
-            plt.plot(objfunc_history[:,2], label="f3 - 1.60 um")
+            line1,line2,line3, = plt.plot(objfunc_history)
+            plt.xlabel("Iteration")
+            plt.ylabel("Value")
+            plt.legend([line1, line2, line3], ["Obj. func. - 1.50 um", "Obj. func. - 1.55 um", "Obj. func. - 1.60 um"])
             plt.subplot(1,2,2)
             plt.plot(epivar_history, label="Epigraph")
             plt.xlabel("Iteration")
             plt.ylabel("Value")
             plt.legend()
-            plt.savefig("results/optimization_history.pdf")
+            plt.savefig(f"results/optimization_history_beta{sigmoid_bias}.pdf")
             plt.close()
 
     saveResults = True
