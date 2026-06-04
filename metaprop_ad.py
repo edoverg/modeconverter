@@ -228,8 +228,8 @@ def conic_filter(phase_mask,radius,size_x,size_y,resolution):
 
     X, Y = npa.meshgrid(xv, yv)
     
-    h = npa.where(X**2 + Y**2 < radius**2, (1 - np.sqrt(abs(X**2 + Y**2)) / radius),0)
-    #h = npa.where(X**2 + Y**2 < radius**2, 1, 0)
+    #h = npa.where(X**2 + Y**2 < radius**2, (1 - np.sqrt(abs(X**2 + Y**2)) / radius),0)
+    h = npa.where(X**2 + Y**2 < radius**2, 1, 0)
     h = _quarter_to_full_kernel(h, 3 * np.array([Nx, Ny]))
     h = h / npa.sum(h)
     H = npa.fft.fft2(h)
