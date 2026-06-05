@@ -36,7 +36,7 @@ z_prop = 300 #propagation distance
 
 input_field = np.ones((S))
 
-opt_max_eval = 300
+opt_max_eval = 200
 
 def phase_given_w(w):
     '''Returns the phase shift given the design parameters w.
@@ -104,7 +104,7 @@ target_intensity = intensity_desired_fn_pattern(xs, ys)
 mean_target_intensity = np.mean(target_intensity)
 
 
-filter_radius_um = 1
+filter_radius_um = 0.5
 def _centered(arr: np.ndarray, newshape: ArrayLikeType) -> np.ndarray:
     """Formats the output of an FFT to center the zero-frequency component.
 
@@ -228,8 +228,8 @@ def conic_filter(phase_mask,radius,size_x,size_y,resolution):
 
     X, Y = npa.meshgrid(xv, yv)
     
-    #h = npa.where(X**2 + Y**2 < radius**2, (1 - np.sqrt(abs(X**2 + Y**2)) / radius),0)
-    h = npa.where(X**2 + Y**2 < radius**2, 1, 0)
+    h = npa.where(X**2 + Y**2 < radius**2, (1 - np.sqrt(abs(X**2 + Y**2)) / radius),0)
+    #h = npa.where(X**2 + Y**2 < radius**2, 1, 0)
     h = _quarter_to_full_kernel(h, 3 * np.array([Nx, Ny]))
     h = h / npa.sum(h)
     H = npa.fft.fft2(h)
