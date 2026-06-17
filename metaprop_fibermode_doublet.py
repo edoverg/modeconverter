@@ -79,6 +79,7 @@ def get_pattern() -> np.ndarray:
 
 def get_fiber_mode_pattern():
     '''Returns the flattened target fiber mode pattern'''
+    print("Computing target fiber mode pattern...")
     lda = 1.55e-6
 
     n_co = 1.4630
@@ -258,7 +259,7 @@ def _compute_cost():
 
     forward_propagate()
 
-    output_field = output_fields[-1]
+    output_field = intermediate_fields[-1]
 
     circular_mask = np.where(rho.flatten() < 10*6e-6, 1, 0) 
     C_s = np.abs(np.sum(output_field*circular_mask * np.conj(target_Efield))) ** 2
@@ -316,8 +317,8 @@ if __name__ == "__main__":
 
     #verify the results
     phase_mask = phase_given_w(w_norm)
-    output_fields, _ = forward_propagate(phase_mask)
-    output_field = output_fields[-1]
+    forward_propagate()
+    output_field = intermediate_fields[-1]
     
     input_power = np.sum(np.abs(input_field)**2)
     output_power = np.sum(np.abs(output_field)**2)
