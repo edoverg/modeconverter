@@ -2,11 +2,10 @@
 #from jax.numpy.fft import fft2, ifft2, fftshift, ifftshift
 from typing import List, Tuple, Union
 from autograd import numpy as npa, tensor_jacobian_product, grad as gd
-import meep.adjoint as mpa
+import time
 import numpy as np
 import matplotlib.pyplot as plt
-import xarray as xr
-from PIL import Image
+
 import nlopt
 from scipy.special import jv, kv
 ArrayLikeType = Union[List, Tuple, np.ndarray]
@@ -24,6 +23,7 @@ ds = 1 / res_x
 
 Nx = int(round(res_x * size_x)) + 1
 Ny = int(round(res_y * size_y)) + 1 
+print("Nx: ", Nx)
 S = Nx * Ny
 
 norm_phase_min = 0
@@ -149,6 +149,7 @@ def forward_propagate(phase_mask:np.ndarray) -> Tuple[List[np.ndarray], List[np.
         The output field after propagation (flattened) and the propagation matrices P used in the forward propagation.
     '''
     print("Starting propagating...")
+    start_time = time.time()
     phase_mask_1 = phase_mask[:S]
     phase_mask_2 = phase_mask[S:]
     d1 = d[0]
@@ -180,7 +181,8 @@ def forward_propagate(phase_mask:np.ndarray) -> Tuple[List[np.ndarray], List[np.
     output_field_2_2d = np.fft.ifft2(np.fft.ifftshift(fft_field_propagated_2))
     output_field_2 = output_field_2_2d.flatten()
     
-    print("Propagation finished.")
+    end_time = time.time()
+    print("Propagation finished in {:.6f} seconds.".format(end_time - start_time))
 
     output_fields = [output_field_1, output_field_2]
     propagation_matrices = [P_1, P_2]
@@ -196,6 +198,8 @@ def adjoint_propagate(output_fields,propagation_matrices,phase_mask):
     Returns:
         The backpropagated field (flattened)
     '''
+    print("Computing adjoint...")
+    start_time = time.time()
     phase_mask_1 = phase_mask[:S]
     phase_mask_2 = phase_mask[S:]
     
@@ -232,7 +236,9 @@ def adjoint_propagate(output_fields,propagation_matrices,phase_mask):
     grad_C_phi_2 = 2 * np.real(-1j * output_field_1.reshape((Nx,Ny)).T.conj().flatten() * adjoint_field_2_propagated)    
 
     grads = np.concatenate((grad_C_phi_1, grad_C_phi_2))
-
+    
+    end_time = time.time()
+    print("Adjoint finished in {:.6f} seconds.".format(end_time - start_time))
     return grads
 
 def _compute_cost(phase_mask):
