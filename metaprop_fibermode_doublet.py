@@ -20,15 +20,14 @@ k0 = 2 * np.pi / wavelength
 
 opt_max_eval = 250
 
-size_x = 1024 * wavelength
-size_y = 1024 * wavelength
-res_x = 6 / 1e-6 #number of pixels per unit-length
-res_y = res_x
-ds = 1 / res_x
+unit_cell_pitch = 400e-9 #equivalent to spatial sampling
 
-Nx = int(np.pow(2,int(np.log(int(round(res_x * size_x))) / np.log(2))))
-Ny = int(np.pow(2,int(np.log(int(round(res_x * size_x))) / np.log(2))))
+Nx = 4096 #pixels per dimension
+Ny = Nx
 S = Nx * Ny
+
+size_x = unit_cell_pitch * Nx #actual physical size
+size_y = unit_cell_pitch * Ny
 
 ######################
 #plan pyfftw objects for forward and inverse FFTs
@@ -56,7 +55,7 @@ rho = np.sqrt(X**2 + Y**2)
 sampling_period = xs[1] - xs[0]
 
 d1 = 4000e-6 #propagation distance
-d2 = 1000e-6 #propagation distance
+d2 = 4000e-6 #propagation distance
 d = [d1, d2] #d = [d1,d2] d1:distance MS1-MS2, d2: distance MS2-target
 
 def phase_given_w(w):
@@ -155,7 +154,7 @@ target_Efield =  target_Efield_2d.flatten() #normalized target field (intensity 
 w_norm = np.zeros((2*S)) #concatenated normalized parameters for both masks
 X, Y = np.meshgrid(np.linspace(-size_x/2, size_x/2, Nx), np.linspace(-size_y/2, size_y/2, Ny))
 rho = np.sqrt(X**2 + Y**2)
-circular_mask_1 = np.where(rho.flatten() < 10*6e-6, 0.5, 0) 
+circular_mask_1 = np.where(rho.flatten() < 10*6e-6, 0, 0) 
 w_norm[:S] += circular_mask_1
 target_pattern_phase = (np.angle(target_Efield) + 2 * np.pi) % (2 * np.pi) #make sure the phase is between 0 and 2pi
 w_norm[S:] += target_pattern_phase / (2 * np.pi) #normalize the target phase to be between 0 and 1
@@ -300,7 +299,7 @@ if __name__ == "__main__":
     solver.set_param("verbosity",1)
 
     print("Starting optimization...")
-    start = True
+    start = False
     if start:
         w_norm[:] = solver.optimize(w_norm)
     print("Optimization completed.")
@@ -333,8 +332,8 @@ if __name__ == "__main__":
     ax.set_title('Output Field Amplitude')
     ax.set_xlabel('x')
     ax.set_ylabel('y')
-    ax.set_xlim(-d, d)
-    ax.set_ylim(-d, d)
+    #ax.set_xlim(-d, d)
+    #ax.set_ylim(-d, d)
     ax.set_aspect('equal') 
     plt.colorbar(im, ax=ax)
     plt.tight_layout()
@@ -371,7 +370,7 @@ if __name__ == "__main__":
     
     # Plot 4: Target field phase
     fig, ax = plt.subplots(figsize=(10, 8))
-    im = ax.imshow((np.angle(target_field_2d)+2*np.pi)%(2*np.pi),extent=(-size_x*1e6/2, size_x*1e6/2, -size_y*1e6/2, size_y*1e6/2), origin='lower', cmap='hsv')
+    im = ax.imshow((np.angle(target_field_2d)+2*np.pi)%(2*np.pi),extent=(-size_x*1e6/2, size_x*1e6/2, -size_y*1e6/2, size_y*1e6/2), origin='lower', cmap='hsv', vmin=0, vmax=2*np.pi)
     ax.set_title('Target Field Phase')
     ax.set_xlabel('x')
     ax.set_ylabel('y')
