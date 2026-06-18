@@ -1,11 +1,10 @@
-#from jax import numpy as np, grad
-#from jax.numpy.fft import fft2, ifft2, fftshift, ifftshift
-from typing import List, Tuple, Union
 import time
+import multiprocessing
 
 import pyfftw
 #pyFFTW setup
-pyfftw.config.NUM_THREADS = 4
+n_cpu = multiprocessing.cpu_count()
+pyfftw.config.NUM_THREADS = n_cpu
 pyfftw.interfaces.cache.enable()
 pyfftw.config.PLANNER_EFFORT = 'FFTW_MEASURE'
 
@@ -15,21 +14,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from scipy.special import jv, kv
-ArrayLikeType = Union[List, Tuple, np.ndarray]
 
 wavelength = 1.55e-6
 k0 = 2 * np.pi / wavelength
 
 opt_max_eval = 250
 
-size_x = 1024 * wavelength
-size_y = 1024 * wavelength
+size_x = 512 * wavelength
+size_y = 512 * wavelength
 res_x = 3 / 1e-6 #number of pixels per unit-length
 res_y = res_x
 ds = 1 / res_x
 
-Nx = int(round(res_x * size_x)) + 1
-Ny = int(round(res_y * size_y)) + 1 
+Nx = np.pow(2,int(np.log(int(round(res_x * size_x))) / np.log(2)))
+Ny = np.pow(2,int(np.log(int(round(res_x * size_x))) / np.log(2)))
 S = Nx * Ny
 
 ######################
@@ -39,8 +37,8 @@ fft_output_array = pyfftw.empty_aligned((Nx, Ny), dtype='complex128', n=16)
 ifft_input_array = pyfftw.empty_aligned((Nx, Ny), dtype='complex128', n=16)
 ifft_output_array = pyfftw.empty_aligned((Nx, Ny), dtype='complex128', n=16)
 
-fft_operator = pyfftw.FFTW(fft_input_array, fft_output_array, axes=(0,1), direction='FFTW_FORWARD')
-ifft_operator = pyfftw.FFTW(ifft_input_array, ifft_output_array, axes=(0,1), direction='FFTW_BACKWARD')
+fft_operator = pyfftw.FFTW(fft_input_array, fft_output_array, axes=(0,1), direction='FFTW_FORWARD', threads=n_cpu, flags=('FFTW_MEASURE','FFTW_DESTROY_INPUT',))
+ifft_operator = pyfftw.FFTW(ifft_input_array, ifft_output_array, axes=(0,1), direction='FFTW_BACKWARD', threads=n_cpu, flags=('FFTW_MEASURE','FFTW_DESTROY_INPUT',))
 ######################
 
 norm_phase_min = 0
@@ -78,7 +76,7 @@ def get_pattern() -> np.ndarray:
     return pattern.flatten()
 
 def get_fiber_mode_pattern():
-    '''Returns the flattened target fiber mode pattern'''
+    '''Returns the target fiber mode pattern'''
     print("Computing target fiber mode pattern...")
     lda = 1.55e-6
 
@@ -134,18 +132,21 @@ def get_fiber_mode_pattern():
             else:#outside core
                 E_field[i,j] = kv(n_mode_sel, chi_cl * r) / kv(n_mode_sel, chi_cl * a) * np.cos(n_mode_sel * phi)
 
-    return E_field.flatten()
+    return E_field
 
 ###########################
 #initialize input field
 beam_waist = 70e-6
 gaussian_field = np.exp(-rho**2 / (beam_waist)**2) #Gaussian input field, flattened
-input_field = (gaussian_field / np.sqrt(np.sum(np.abs(gaussian_field)**2))).flatten() #normalize the input field to have power = 1
+input_field_2d = (gaussian_field / np.sqrt(np.sum(np.abs(gaussian_field)**2))) #normalize the input field to have power = 1
+input_field = input_field_2d.flatten() #normalize the input field to have power = 1
 ###########################
 
 ###########################
 #initialize target field
-target_Efield = get_fiber_mode_pattern() / np.sqrt(np.sum(np.abs(get_fiber_mode_pattern())**2)) #normalized target field (intensity = 1)
+fiber_mode_pattern = get_fiber_mode_pattern()
+target_Efield_2d = fiber_mode_pattern / np.sqrt(np.sum(np.abs(fiber_mode_pattern)**2))
+target_Efield =  target_Efield_2d.flatten() #normalized target field (intensity = 1)
 ###########################
 
 ###########################
@@ -158,8 +159,6 @@ w_norm[:S] += circular_mask_1
 target_pattern_phase = (np.angle(target_Efield) + 2 * np.pi) % (2 * np.pi) #make sure the phase is between 0 and 2pi
 w_norm[S:] += target_pattern_phase / (2 * np.pi) #normalize the target phase to be between 0 and 1
 phase_mask = phase_given_w(w_norm)
-phase_mask_1 = phase_mask[:S]
-phase_mask_2 = phase_mask[S:]
 ###########################
 
 ###########################
@@ -176,6 +175,11 @@ P_1_nat = np.fft.ifftshift(P_1)
 phase_factor_2 = k0 * d2 * np.sqrt(1 - (wavelength * nu_parallel) ** 2 + 0*1j)
 P_2 = np.exp(1j * phase_factor_2)
 P_2_nat = np.fft.ifftshift(P_2)
+
+P_1_dagger = P_1.T.conj()
+P_2_dagger = P_2.T.conj()
+P_1_dagger_nat = np.fft.ifftshift(P_1).T.conj()
+P_2_dagger_nat = np.fft.ifftshift(P_2).T.conj()
 ###########################
 
 intermediate_fields = [None, None]
@@ -189,13 +193,13 @@ def forward_propagate() -> None:
     print("Starting propagating...")
     start_time = time.time()
 
-    fft_input_array[:,:] = (input_field * np.exp(1j * phase_mask_1)).reshape((Nx, Ny))
+    fft_input_array[:,:] = (input_field * np.exp(1j * phase_mask[:S])).reshape((Nx, Ny))
     fft_operator()
     ifft_input_array[:,:] = fft_operator.output_array * P_1_nat #element wise product
     ifft_operator()
     intermediate_fields[0] = ifft_operator.output_array.copy()
 
-    fft_input_array[:,:] = (ifft_operator.output_array.flatten() * np.exp(1j * phase_mask_2)).reshape((Nx, Ny))
+    fft_input_array[:,:] = (ifft_operator.output_array.flatten() * np.exp(1j * phase_mask[S:])).reshape((Nx, Ny))
     fft_operator()
     ifft_input_array[:,:] = fft_operator.output_array * P_2_nat #element wise product
     ifft_operator()
@@ -216,50 +220,35 @@ def adjoint_propagate():
     '''
     print("Computing adjoint...")
     start_time = time.time()
-    phase_mask_1 = phase_mask[:S]
-    phase_mask_2 = phase_mask[S:]
-    
-    output_field_1 = intermediate_fields[0]
-    input_field_2 = output_field_1
-    output_field_2 = intermediate_fields[1]
-    
-    P_1_dagger = P_1.T.conj()
-    P_2_dagger = P_2.T.conj()
-    
-    Phi_1 = np.exp(1j * phase_mask_1)
-    Phi_2 = np.exp(1j * phase_mask_2)
-    Phi_1_dagger = np.exp(-1j * phase_mask_1)
-    Phi_2_dagger = np.exp(-1j * phase_mask_2)
-    
+
+    Phi_1_dagger = np.exp(-1j * phase_mask[:S]).reshape((Nx, Ny))
+    Phi_2_dagger = np.exp(-1j * phase_mask[S:]).reshape((Nx, Ny))
+
     #compute the adjoint source
-    adjoint_field = np.sum(output_field_2 * np.conj(target_Efield)) * target_Efield
-    adjoint_field_2d = adjoint_field.reshape((Nx, Ny))
-    
-    adjoint_field_fft = np.fft.fftshift(np.fft.fft2(adjoint_field_2d))
-    pd2 = adjoint_field_fft * P_2_dagger #element wise
-    adjoint_field_2_propagated_2d = np.fft.ifft2(np.fft.ifftshift(pd2))
-    adjoint_field_2_propagated = adjoint_field_2_propagated_2d.flatten() * Phi_2_dagger
-    adjoint_field_2_propagated_2d = adjoint_field_2_propagated.reshape((Nx, Ny))
-    adjoint_field_2_propagated_fft = np.fft.fftshift(np.fft.fft2(adjoint_field_2_propagated_2d))
-    pd1 = adjoint_field_2_propagated_fft * P_1_dagger #element wise
-    adjoint_field_1_propagated_2d = np.fft.ifft2(np.fft.ifftshift(pd1))
-    adjoint_field_1_propagated = adjoint_field_1_propagated_2d.flatten() * Phi_1_dagger
+    fft_input_array[:,:] = np.sum(intermediate_fields[1] * np.conj(target_Efield_2d)) * target_Efield_2d
+    fft_operator()
+    ifft_input_array[:,:] = fft_operator.output_array * P_2_dagger_nat
+    ifft_operator()
+    fft_input_array[:,:] = ifft_operator.output_array * Phi_2_dagger
 
-    grad_C_phi_1 = 2 * np.real(-1j * input_field.reshape((Nx,Ny)).T.conj().flatten() * adjoint_field_1_propagated)
+    grad_C_phi_2 = 2 * np.real(-1j * intermediate_fields[0].T.conj() * fft_input_array).flatten() 
 
-    grad_C_phi_2 = 2 * np.real(-1j * output_field_1.reshape((Nx,Ny)).T.conj().flatten() * adjoint_field_2_propagated)    
+    fft_operator()
+    adjoint_field_2_propagated_fft = fft_operator.output_array
+    ifft_input_array[:,:] = adjoint_field_2_propagated_fft * P_1_dagger_nat #element wise
+    ifft_operator()
 
-    grads = np.concatenate((grad_C_phi_1, grad_C_phi_2))
+    grad_C_phi_1 = 2 * np.real(-1j * input_field_2d.T.conj() * ifft_operator.output_array * Phi_1_dagger).flatten()
     
     end_time = time.time()
     print("Adjoint finished in {:.6f} seconds.".format(end_time - start_time))
-    return grads
+    return np.concatenate((grad_C_phi_1, grad_C_phi_2))
 
 def _compute_cost():
 
     forward_propagate()
 
-    output_field = intermediate_fields[-1]
+    output_field = intermediate_fields[-1].flatten()
 
     circular_mask = np.where(rho.flatten() < 10*6e-6, 1, 0) 
     C_s = np.abs(np.sum(output_field*circular_mask * np.conj(target_Efield))) ** 2
@@ -451,6 +440,17 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig("results/phase_cut_comparison.pdf")
     plt.close()
+
+    # Plot 9: Intermediate field before second phase mask
+    fig, ax = plt.subplots(figsize=(10, 8))
+    im = ax.imshow(np.abs(intermediate_fields[0]),extent=(-size_x*1e6/2, size_x*1e6/2, -size_y*1e6/2, size_y*1e6/2), origin='lower', cmap='viridis')
+    ax.set_title('Intermediate Field Amplitude (Before Second Phase Mask)')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_aspect('equal')
+    plt.colorbar(im, ax=ax)
+    plt.tight_layout()
+    plt.savefig("results/intermediate_field_amplitude.pdf")
     
     #save the phase masks for later use
     np.savetxt("results/optimized_phase_mask_1.txt", phase_mask_1)
