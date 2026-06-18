@@ -22,7 +22,7 @@ opt_max_eval = 250
 
 unit_cell_pitch = 400e-9 #equivalent to spatial sampling
 
-Nx = 4096 #pixels per dimension
+Nx = 8192 #pixels per dimension
 Ny = Nx
 S = Nx * Ny
 
@@ -125,7 +125,7 @@ def get_fiber_mode_pattern():
     for i in range(Nx):
         for j in range(Ny):
             r = np.sqrt(X[i,j]**2 + Y[i,j]**2)
-            if r < 5*a:
+            if r < 10*a:
                 phi = np.arctan2(Y[i,j], X[i,j])
                 if r < a:#inside core
                     E_field[i,j] = jv(n_mode_sel,chi_co * r) / jv(n_mode_sel, chi_co * a) * np.cos(n_mode_sel * phi)
@@ -136,10 +136,20 @@ def get_fiber_mode_pattern():
 
 ###########################
 #initialize input field
-beam_waist = 70e-6
+beam_waist = 300e-6
 gaussian_field = np.exp(-rho**2 / (beam_waist)**2) #Gaussian input field, flattened
 input_field_2d = (gaussian_field / np.sqrt(np.sum(np.abs(gaussian_field)**2))) #normalize the input field to have power = 1
 input_field = input_field_2d.flatten() #normalize the input field to have power = 1
+#make a plot and save the input field
+plt.figure()
+plt.imshow(np.abs(input_field_2d), extent=(-size_x*1e6/2, size_x*1e6/2, -size_y*1e6/2, size_y*1e6/2))
+plt.title("Input Field Amplitude")
+plt.xlabel("x (um)")
+plt.ylabel("y (um)")
+plt.colorbar()
+plt.tight_layout()
+plt.savefig("results/input_field_amplitude.pdf")
+plt.close()
 ###########################
 
 ###########################
