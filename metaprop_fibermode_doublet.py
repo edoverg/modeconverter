@@ -22,12 +22,12 @@ opt_max_eval = 250
 
 size_x = 512 * wavelength
 size_y = 512 * wavelength
-res_x = 3 / 1e-6 #number of pixels per unit-length
+res_x = 6 / 1e-6 #number of pixels per unit-length
 res_y = res_x
 ds = 1 / res_x
 
-Nx = np.pow(2,int(np.log(int(round(res_x * size_x))) / np.log(2)))
-Ny = np.pow(2,int(np.log(int(round(res_x * size_x))) / np.log(2)))
+Nx = int(np.pow(2,int(np.log(int(round(res_x * size_x))) / np.log(2))))
+Ny = int(np.pow(2,int(np.log(int(round(res_x * size_x))) / np.log(2))))
 S = Nx * Ny
 
 ######################
@@ -126,11 +126,12 @@ def get_fiber_mode_pattern():
     for i in range(Nx):
         for j in range(Ny):
             r = np.sqrt(X[i,j]**2 + Y[i,j]**2)
-            phi = np.arctan2(Y[i,j], X[i,j])
-            if r < a:#inside core
-                E_field[i,j] = jv(n_mode_sel,chi_co * r) / jv(n_mode_sel, chi_co * a) * np.cos(n_mode_sel * phi)
-            else:#outside core
-                E_field[i,j] = kv(n_mode_sel, chi_cl * r) / kv(n_mode_sel, chi_cl * a) * np.cos(n_mode_sel * phi)
+            if r < 5*a:
+                phi = np.arctan2(Y[i,j], X[i,j])
+                if r < a:#inside core
+                    E_field[i,j] = jv(n_mode_sel,chi_co * r) / jv(n_mode_sel, chi_co * a) * np.cos(n_mode_sel * phi)
+                else:#outside core
+                    E_field[i,j] = kv(n_mode_sel, chi_cl * r) / kv(n_mode_sel, chi_cl * a) * np.cos(n_mode_sel * phi)
 
     return E_field
 
