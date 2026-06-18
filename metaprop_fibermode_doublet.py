@@ -20,8 +20,8 @@ k0 = 2 * np.pi / wavelength
 
 opt_max_eval = 250
 
-size_x = 512 * wavelength
-size_y = 512 * wavelength
+size_x = 1024 * wavelength
+size_y = 1024 * wavelength
 res_x = 6 / 1e-6 #number of pixels per unit-length
 res_y = res_x
 ds = 1 / res_x
