@@ -6,7 +6,7 @@ k0 = 2 * np.pi / wavelength
 
 unit_cell_pitch = 400e-9
 
-Nx = 1024*8
+Nx = 1024*10
 Ny = Nx
 S = Nx * Ny
 
