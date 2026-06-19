@@ -12,7 +12,7 @@ S = Nx * Ny
 
 #size_x = unit_cell_pitch * Nx
 #size_y = unit_cell_pitch * Ny
-size_x = 1638.4e-6
+size_x = 7968e-6
 size_y = size_x
 
 norm_phase_min = 0
