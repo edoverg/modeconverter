@@ -6,14 +6,12 @@ k0 = 2 * np.pi / wavelength
 
 unit_cell_pitch = 400e-9
 
-Nx = 1024*10
+Nx = 1024*2
 Ny = Nx
 S = Nx * Ny
 
-#size_x = unit_cell_pitch * Nx
-#size_y = unit_cell_pitch * Ny
-size_x = 7968e-6
-size_y = size_x
+size_x = unit_cell_pitch * Nx
+size_y = unit_cell_pitch * Ny
 
 norm_phase_min = 0
 norm_phase_max = 1
@@ -63,8 +61,8 @@ def forward_propagate(phase_mask):
     KX, KY = np.meshgrid(kappas, kappas)
     K_parallel = np.sqrt(KX**2 + KY**2)
     nu_parallel = K_parallel / (2 * np.pi)
-    #phase_factor = k0 * z_prop * np.sqrt(1 - (wavelength * nu_parallel) ** 2 + 0*1j)
-    phase_factor = k0 * z_prop * (1 - 0.5*((wavelength * nu_parallel) ** 2 + 0*1j))
+    phase_factor = k0 * z_prop * np.sqrt(1 - (wavelength * nu_parallel) ** 2 + 0*1j)
+    #phase_factor = k0 * z_prop * (1 - 0.5*((wavelength * nu_parallel) ** 2 + 0*1j))
     P = np.exp(1j * phase_factor)
     fft_field_propagated = np.multiply(field_fft,P) #element wise product
 
@@ -79,7 +77,7 @@ if __name__ == "__main__":
 
     output_field, P = forward_propagate(phase_mask_test)
 
-    plt.figure(figsize=(10, 12))
+    plt.figure(figsize=(10, 10))
     plt.subplot(4, 2, 1)
     #plt.imshow(np.abs(field_fft), extent=(-ks/2, ks/2, -ks/2, ks/2))
     plt.imshow(np.abs(output_field.reshape((Nx,Ny))), extent=(-size_x/2*1e6, size_x/2*1e6, -size_y/2*1e6, size_y/2*1e6))
@@ -103,16 +101,16 @@ if __name__ == "__main__":
     #make this subplot take two places in the figure
     
     plt.subplot(4, 2, 3)
-    plt.plot(xs*1e6, np.abs(output_field.reshape((Nx,Ny))[Nx//2, :])**2, 'b-', label='output')
-    plt.plot(xs*1e6, gaussian_profile**2, 'r--', label='theory')
+    plt.plot(xs*1e6, np.abs(output_field.reshape((Nx,Ny))[Nx//2, :])**2 / np.max(np.abs(output_field.reshape((Nx,Ny))[Nx//2, :])**2), 'b-', label='output')
+    plt.plot(xs*1e6, gaussian_profile**2 / np.max(gaussian_profile**2), 'r--', label='theory')
     plt.xlabel('x (um)')
     plt.ylabel('Intensity (a.u.)')
-    plt.legend()
+    plt.legend(loc='center left')
     plt.subplot(4, 2, 4)
     plt.plot(xs*1e6, np.abs(input_field.reshape((Nx,Ny))[Nx//2, :])**2, 'g--', label='input')
     plt.xlabel('x (um)')
     plt.ylabel('Intensity (a.u.)')
-    plt.legend()
+    plt.legend(loc='center left')
 
     plt.subplot(4,1,3)
     plt.plot(xs*1e6, np.angle(output_field.reshape((Nx,Ny))[Nx//2, :])%(2*np.pi), 'b-', label='output phase')
@@ -120,7 +118,8 @@ if __name__ == "__main__":
     plt.plot(xs*1e6, np.angle(input_field.reshape((Nx,Ny))[Nx//2, :]), 'g--', label='input phase')
     plt.xlabel('x (um)')
     plt.ylabel('Phase (rad)')
-    plt.legend()
+    plt.legend(loc='center left')
+
 
     plt.subplot(4,1,4)
     plt.plot(xs*1e6, np.angle(output_field.reshape((Nx,Ny))[Nx//2, :])%(2*np.pi), 'b-', label='output phase')
@@ -129,5 +128,8 @@ if __name__ == "__main__":
     plt.xlabel('x (um)')
     plt.xlim(np.max(size_x/4*1e6), np.max(size_x/2*1e6))
     plt.ylabel('Phase (rad)')
+    plt.legend(loc='center left')
 
+
+    plt.tight_layout()
     plt.savefig("propagation_verification.pdf")

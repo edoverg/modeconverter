@@ -18,11 +18,11 @@ from scipy.special import jv, kv
 wavelength = 1.55e-6
 k0 = 2 * np.pi / wavelength
 
-opt_max_eval = 250
+opt_max_eval = 200
 
 unit_cell_pitch = 400e-9 #equivalent to spatial sampling
 
-Nx = 8192 #pixels per dimension
+Nx = 2048 #pixels per dimension
 Ny = Nx
 S = Nx * Ny
 
@@ -40,9 +40,6 @@ fft_operator = pyfftw.FFTW(fft_input_array, fft_output_array, axes=(0,1), direct
 ifft_operator = pyfftw.FFTW(ifft_input_array, ifft_output_array, axes=(0,1), direction='FFTW_BACKWARD', threads=n_cpu, flags=('FFTW_MEASURE','FFTW_DESTROY_INPUT',))
 ######################
 
-norm_phase_min = 0
-norm_phase_max = 1
-
 phase_min = 0
 phase_max = 2 * np.pi
 
@@ -54,8 +51,8 @@ rho = np.sqrt(X**2 + Y**2)
 
 sampling_period = xs[1] - xs[0]
 
-d1 = 4000e-6 #propagation distance
-d2 = 4000e-6 #propagation distance
+d1 = 1000e-6 #propagation distance
+d2 = 1000e-6 #propagation distance
 d = [d1, d2] #d = [d1,d2] d1:distance MS1-MS2, d2: distance MS2-target
 
 def phase_given_w(w):
@@ -136,7 +133,7 @@ def get_fiber_mode_pattern():
 
 ###########################
 #initialize input field
-beam_waist = 300e-6
+beam_waist = 80e-6
 gaussian_field = np.exp(-rho**2 / (beam_waist)**2) #Gaussian input field, flattened
 input_field_2d = (gaussian_field / np.sqrt(np.sum(np.abs(gaussian_field)**2))) #normalize the input field to have power = 1
 input_field = input_field_2d.flatten() #normalize the input field to have power = 1
@@ -169,6 +166,15 @@ w_norm[:S] += circular_mask_1
 target_pattern_phase = (np.angle(target_Efield) + 2 * np.pi) % (2 * np.pi) #make sure the phase is between 0 and 2pi
 w_norm[S:] += target_pattern_phase / (2 * np.pi) #normalize the target phase to be between 0 and 1
 phase_mask = phase_given_w(w_norm)
+
+#define bounding box for the optimization. The outer mask is fixed to zero phase, while the inner mask can vary between 0 and 2pi phase.
+#the bounding box is the outer shell of a square with thickness 100 um
+norm_phase_min = 0
+norm_phase_max = 1
+mask_buffer = 100e-6
+mask_upper_bounds = norm_phase_max * np.where((np.abs(X.flatten()) > size_x/2 - mask_buffer) | (np.abs(Y.flatten()) > size_y/2 - mask_buffer), 0, 1)
+mask_upper_bounds = np.concatenate((mask_upper_bounds, mask_upper_bounds),axis=0)
+mask_lower_bounds = np.zeros_like(mask_upper_bounds)
 ###########################
 
 ###########################
@@ -208,8 +214,9 @@ def forward_propagate() -> None:
     ifft_input_array[:,:] = fft_operator.output_array * P_1_nat #element wise product
     ifft_operator()
     intermediate_fields[0] = ifft_operator.output_array.copy()
+    print("Field intensity after first phase mask and propagation: %.4e" % np.sum(np.abs(intermediate_fields[0])**2))
 
-    fft_input_array[:,:] = (ifft_operator.output_array.flatten() * np.exp(1j * phase_mask[S:])).reshape((Nx, Ny))
+    fft_input_array[:,:] = (ifft_operator.output_array * np.exp(1j * phase_mask[S:].reshape((Nx, Ny))))
     fft_operator()
     ifft_input_array[:,:] = fft_operator.output_array * P_2_nat #element wise product
     ifft_operator()
@@ -244,8 +251,7 @@ def adjoint_propagate():
     grad_C_phi_2 = 2 * np.real(-1j * intermediate_fields[0].T.conj() * fft_input_array).flatten() 
 
     fft_operator()
-    adjoint_field_2_propagated_fft = fft_operator.output_array
-    ifft_input_array[:,:] = adjoint_field_2_propagated_fft * P_1_dagger_nat #element wise
+    ifft_input_array[:,:] = fft_operator.output_array * P_1_dagger_nat #element wise
     ifft_operator()
 
     grad_C_phi_1 = 2 * np.real(-1j * input_field_2d.T.conj() * ifft_operator.output_array * Phi_1_dagger).flatten()
@@ -301,8 +307,10 @@ def cost_fun(x, grad):
 if __name__ == "__main__":
     #initialize nlopt solver
     solver = nlopt.opt(nlopt.LD_CCSAQ, 2*S)
-    solver.set_lower_bounds(norm_phase_min)
-    solver.set_upper_bounds(norm_phase_max)
+    print("Type of bounds",type(mask_lower_bounds.flatten()), type(mask_upper_bounds.flatten()))
+    print("Size of bounds",mask_lower_bounds.flatten().shape, mask_upper_bounds.flatten().shape)
+    solver.set_lower_bounds(mask_lower_bounds.flatten())
+    solver.set_upper_bounds(mask_upper_bounds.flatten())
     solver.set_max_objective(cost_fun)
     solver.set_maxeval(opt_max_eval)
     solver.set_param("dual_ftol_rel", 1e-7)
@@ -394,7 +402,7 @@ if __name__ == "__main__":
     
     # Plot 5: Phase mask 1
     fig, ax = plt.subplots(figsize=(10, 8))
-    im = ax.imshow((phase_mask_1+2*np.pi)%(2*np.pi),extent=(-size_x*1e6/2, size_x*1e6/2, -size_y*1e6/2, size_y*1e6/2), origin='lower', cmap='viridis')
+    im = ax.imshow((phase_mask_1+2*np.pi)%(2*np.pi),extent=(-size_x*1e6/2, size_x*1e6/2, -size_y*1e6/2, size_y*1e6/2), origin='lower', cmap='hsv', vmin=0, vmax=2*np.pi)
     ax.set_title('Phase Mask 1')
     ax.set_xlabel('x')
     ax.set_ylabel('y')
@@ -402,11 +410,12 @@ if __name__ == "__main__":
     plt.colorbar(im, ax=ax)
     plt.tight_layout()
     plt.savefig("results/phase_mask_1.pdf")
-    plt.close()
+    plt.show()
+    #plt.close()
     
     # Plot 6: Phase mask 2
     fig, ax = plt.subplots(figsize=(10, 8))
-    im = ax.imshow((phase_mask_2+2*np.pi)%(2*np.pi),extent=(-size_x*1e6/2, size_x*1e6/2, -size_y*1e6/2, size_y*1e6/2), origin='lower', cmap='viridis')
+    im = ax.imshow((phase_mask_2+2*np.pi)%(2*np.pi),extent=(-size_x*1e6/2, size_x*1e6/2, -size_y*1e6/2, size_y*1e6/2), origin='lower', cmap='hsv', vmin=0, vmax=2*np.pi)
     ax.set_title('Phase Mask 2')
     ax.set_xlabel('x')
     ax.set_ylabel('y')
@@ -414,7 +423,8 @@ if __name__ == "__main__":
     plt.colorbar(im, ax=ax)
     plt.tight_layout()
     plt.savefig("results/phase_mask_2.pdf")
-    plt.close()
+    plt.show()
+    #plt.close()
     
     # Plot 7: Cuts along y=0 axis - Amplitude comparison
     y_center_idx = Ny // 2
