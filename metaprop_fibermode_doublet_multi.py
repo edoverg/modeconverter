@@ -12,10 +12,20 @@ import nlopt
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 #set the global font size for all plots
 plt.rcParams.update({'font.size': 14})
 
 from scipy.special import jv, kv
+
+import os
+
+##############################
+#setup results folder
+#if the results folder does not exist, create it
+
+if not os.path.exists("results"):
+    os.makedirs("results")
 
 ##############################
 #physics and simulation domain
@@ -94,7 +104,8 @@ P_2_dagger_nat = np.fft.ifftshift(P_2).T.conj()
 ##############################
 #Plot zoom parameters [um]
 zoom_x = 350
-zoom_x_outmode = 50
+zoom_core_diameter = 2 * 6
+zoom_x_outmode = 12
 zoom_y = 350
 zoom_y_outmode = 50
 full_view_x = size_x * 1e6 / 2
@@ -128,9 +139,9 @@ def get_fiber_mode_pattern(mode_list:list)->list:
     print("Computing fiber patterns for mode indices: ", mode_list)
     lda = 1.55e-6
 
-    n_co = 1.4630
-    n_cl = 1.4585
-    a = 6e-6
+    n_co = 1.4630 #core refractive index
+    n_cl = 1.4585 #cladding refractive index
+    a = 6e-6 #fiber core radius
 
     #find the v parameter range that corresponds to the 1550 nm wavelength
     #v_1550 = 2 * np.pi * a / lda * np.sqrt(n_co**2 - n_cl**2)
@@ -276,6 +287,38 @@ def make_2Dplot_of(given_field,choose_quantity="amplitude",save_name="plot",plot
     plt.savefig("results/" + save_name + ".pdf")
     plt.close()
 
+def make_polarPlot_of(given_field,choose_quantity="amplitude",save_name="polar_plot",plot_zoom_r=zoom_x) -> None:
+    '''Makes a polar plot of the given 2D field in a zoomed region. 
+    Saves the plot with the chosen filename to a PDF file. 
+    Args:
+        given_field: the 2D field to be plotted (flattened)
+        choose_quantity: either "amplitude" or "phase" to select quantity to plot
+        save_name: name of the file to save the plot (without extension)
+        plot_zoom_r: zoom level for the radial axis (in micrometers)
+    Returns:
+        None
+    '''
+    fig, ax = plt.subplots(figsize=(6, 6))
+    if choose_quantity == "amplitude":
+        given_field_2d = np.abs(given_field.reshape((Nx, Ny))) #assure the field is 2D before plotting
+        im = ax.imshow(given_field_2d,origin='lower')
+    elif choose_quantity == "phase":
+        given_field_2d = (np.angle(given_field.reshape((Nx, Ny))) + 2*np.pi) % (2*np.pi)#assure the field is 2D before plotting
+        im = ax.imshow(given_field_2d, cmap='hsv', vmin=0, vmax=2*np.pi)
+    else:
+        raise ValueError("choose_quantity must be either 'amplitude' or 'phase'")
+    
+    center_x, center_y = Nx//2, Ny//2
+    radius = plot_zoom_r * 1e-6 / (size_x/2) * (Nx/2) #convert zoom in um to pixels
+    circle = patches.Circle((center_x, center_y), radius, transform=ax.transData)
+    im.set_clip_path(circle)
+    ax.set_xlim(center_x - radius, center_x + radius)
+    ax.set_ylim(center_y - radius, center_y + radius)
+    ax.axis('off')
+    cbar = plt.colorbar(im, ax=ax)
+    plt.savefig("results/" + save_name + ".pdf")
+    
+
 def shift_spatial_grid(shift_amount_x,shift_amount_y):
     '''Shifts the simulation spatial grid by a given physical (true space) amount. 
     Args:
@@ -342,11 +385,11 @@ target_Efield_1 =  target_Efield_1_2d.flatten() #normalized target field (intens
 target_Efield_2_2d = fiber_mode_pattern_2 / np.sqrt(np.sum(np.abs(fiber_mode_pattern_2)**2))
 target_Efield_2 =  target_Efield_2_2d.flatten() #normalized target field (intensity = 1)
 
-# Plot: Target fields
-make_2Dplot_of(target_Efield_1_2d, choose_quantity="amplitude", save_name="target_field_1_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
-make_2Dplot_of(target_Efield_1_2d, choose_quantity="phase", save_name="target_field_1_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
-make_2Dplot_of(target_Efield_2_2d, choose_quantity="amplitude", save_name="target_field_2_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
-make_2Dplot_of(target_Efield_2_2d, choose_quantity="phase", save_name="target_field_2_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+# Plot target fields using polar coordinates
+make_polarPlot_of(target_Efield_1_2d, choose_quantity="amplitude", save_name="target_field_1_amplitude_polar", plot_zoom_r=zoom_core_diameter)
+make_polarPlot_of(target_Efield_1_2d, choose_quantity="phase", save_name="target_field_1_phase_polar", plot_zoom_r=zoom_core_diameter)
+make_polarPlot_of(target_Efield_2_2d, choose_quantity="amplitude", save_name="target_field_2_amplitude_polar", plot_zoom_r=zoom_core_diameter)
+make_polarPlot_of(target_Efield_2_2d, choose_quantity="phase", save_name="target_field_2_phase_polar", plot_zoom_r=zoom_core_diameter)
 
 target_field_list = [target_Efield_1, target_Efield_2]
 ###########################
@@ -556,7 +599,7 @@ if __name__ == "__main__":
     solver.set_param("verbosity",1)
 
     print("Starting optimization...")
-    start = True
+    start = False
     if start:
         w_norm[:] = solver.optimize(w_norm)
     print("Optimization completed.")
@@ -569,12 +612,12 @@ if __name__ == "__main__":
         all_source_on_field = input_field_list[0] + input_field_list[1]
         verify_out_field_all = forward_propagate(all_source_on_field, opt_weights)[-1]
     
-        make_2Dplot_of(verify_out_field_1, choose_quantity="amplitude", save_name="modeconv1_optimized_output_field_source1_amplitude", plot_zoom_x=zoom_x_outmode, plot_zoom_y=zoom_y_outmode)
-        make_2Dplot_of(verify_out_field_1, choose_quantity="phase", save_name="modeconv1_optimized_output_field_source1_phase", plot_zoom_x=zoom_x_outmode, plot_zoom_y=zoom_y_outmode)
-        make_2Dplot_of(verify_out_field_2, choose_quantity="amplitude", save_name="modeconv1_optimized_output_field_source2_amplitude", plot_zoom_x=zoom_x_outmode, plot_zoom_y=zoom_y_outmode)
-        make_2Dplot_of(verify_out_field_2, choose_quantity="phase", save_name="modeconv1_optimized_output_field_source2_phase", plot_zoom_x=zoom_x_outmode, plot_zoom_y=zoom_y_outmode)
-        make_2Dplot_of(verify_out_field_all, choose_quantity="amplitude", save_name="modeconv1_optimized_output_field_allSource_amplitude", plot_zoom_x=zoom_x_outmode, plot_zoom_y=zoom_y_outmode)
-        make_2Dplot_of(verify_out_field_all, choose_quantity="phase", save_name="modeconv1_optimized_output_field_allSource_phase", plot_zoom_x=zoom_x_outmode, plot_zoom_y=zoom_y_outmode)
+        make_polarPlot_of(verify_out_field_1, choose_quantity="amplitude", save_name="modeconv1_optimized_output_field_source1_amplitude", plot_zoom_r=zoom_core_diameter)
+        make_polarPlot_of(verify_out_field_1, choose_quantity="phase", save_name="modeconv1_optimized_output_field_source1_phase", plot_zoom_r=zoom_core_diameter)
+        make_polarPlot_of(verify_out_field_2, choose_quantity="amplitude", save_name="modeconv1_optimized_output_field_source2_amplitude", plot_zoom_r=zoom_core_diameter)
+        make_polarPlot_of(verify_out_field_2, choose_quantity="phase", save_name="modeconv1_optimized_output_field_source2_phase", plot_zoom_r=zoom_core_diameter)
+        make_polarPlot_of(verify_out_field_all, choose_quantity="amplitude", save_name="modeconv1_optimized_output_field_allSource_amplitude", plot_zoom_r=zoom_core_diameter)
+        make_polarPlot_of(verify_out_field_all, choose_quantity="phase", save_name="modeconv1_optimized_output_field_allSource_phase", plot_zoom_r=zoom_core_diameter)
 
         #make 1D slices of target/outpu fields to compare
         slice_y_index = Ny//2
@@ -586,10 +629,10 @@ if __name__ == "__main__":
         slice_output_all = verify_out_field_all.reshape((Nx, Ny))[slice_y_index,:]
         #amplitude and phase target 1
         make_1Dplot_of([slice_x, slice_x], [np.abs(slice_target_1), np.abs(slice_output_1)], plot_zoom_x=zoom_x_outmode, save_name="modeconv1_output_vs_target_source1_amplitude")
-        make_1Dplot_of([slice_x, slice_x], [np.angle(slice_target_1), np.angle(slice_output_1)], plot_zoom_x=zoom_x_outmode, save_name="modeconv1_output_vs_target_source1_phase")
+        make_1Dplot_of([slice_x, slice_x], [(np.angle(slice_target_1)+2*np.pi)%(2*np.pi), (np.angle(slice_output_1)+2*np.pi)%(2*np.pi)], plot_zoom_x=zoom_x_outmode, save_name="modeconv1_output_vs_target_source1_phase")
         #amplitude and phase target 2
         make_1Dplot_of([slice_x, slice_x], [np.abs(slice_target_2), np.abs(slice_output_2)], plot_zoom_x=zoom_x_outmode, save_name="modeconv1_output_vs_target_source2_amplitude")
-        make_1Dplot_of([slice_x, slice_x], [np.angle(slice_target_2), np.angle(slice_output_2)], plot_zoom_x=zoom_x_outmode, save_name="modeconv1_output_vs_target_source2_phase")
+        make_1Dplot_of([slice_x, slice_x], [(np.angle(slice_target_2)+2*np.pi)%(2*np.pi), (np.angle(slice_output_2)+2*np.pi)%(2*np.pi)], plot_zoom_x=zoom_x_outmode, save_name="modeconv1_output_vs_target_source2_phase")
 
     else:
         verify_out_field_1 = forward_propagate(input_field_list[0], opt_weights)[-1]
@@ -606,7 +649,7 @@ if __name__ == "__main__":
         make_1Dplot_of([slice_x, slice_x], [np.angle(slice_target_1), np.angle(slice_output_1)], plot_zoom_x=zoom_x_outmode, save_name="modeconv1_output_vs_target_source1_phase")
 
     #save the output fields for later use
-    saveFields = False
+    saveFields = True
     if saveFields:
         np.savetxt("results/modeconv1_optimized_output_field_source1.txt", verify_out_field_1.reshape((Nx, Ny)))
         np.savetxt("results/modeconv1_optimized_output_field_source2.txt", verify_out_field_2.reshape((Nx, Ny)))
