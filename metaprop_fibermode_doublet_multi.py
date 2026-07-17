@@ -599,7 +599,7 @@ if __name__ == "__main__":
     solver.set_param("verbosity",1)
 
     print("Starting optimization...")
-    start = False
+    start = True
     if start:
         w_norm[:] = solver.optimize(w_norm)
     print("Optimization completed.")
