@@ -52,7 +52,7 @@ rho = np.sqrt(X**2 + Y**2)
 sampling_period = xs[1] - xs[0]
 
 d0 = 345e-6 #propagation distance: source - MS1
-d1 = 500e-6 #propagation distance: MS1 - MS2
+d1 = 100e-6 #propagation distance: MS1 - MS2
 d2 = 300e-6 #propagation distance: MS2 - target
 d = [d1, d2] #d = [d1,d2] d1:distance MS1-MS2, d2: distance MS2-target
 
@@ -510,6 +510,8 @@ def value_and_grad(weights):
     return np.array(values), np.array(gradients)
 
 opt_history = []
+opt_history1 = []
+opt_history2 = []
 def obj_fun(weights, grad):
     '''
     Objective function for the optimization. Computes the overall cost function by taking the mean value
@@ -524,6 +526,7 @@ def obj_fun(weights, grad):
     w_norm[:] = weights
 
     obj_val, grads = value_and_grad(weights)
+
 
     average_obj_val = np.mean(obj_val)
 
@@ -540,7 +543,9 @@ def obj_fun(weights, grad):
         make_2Dplot_of(np.abs(grad[S:].reshape((Nx, Ny))), choose_quantity="amplitude", save_name="gradient_magnitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
 
     opt_history.append(average_obj_val)
-    make_1Dplot_of([np.arange(len(opt_history))], [opt_history], plot_zoom_x=len(opt_history), save_name="optimization_history")
+    opt_history1.append(obj_val[0])
+    opt_history2.append(obj_val[1])
+    make_1Dplot_of([np.arange(len(opt_history))]*3, [opt_history,opt_history1,opt_history2], plot_zoom_x=len(opt_history), save_name="optimization_history")
 
     return average_obj_val
 
@@ -619,7 +624,7 @@ if __name__ == "__main__":
         make_polarPlot_of(verify_out_field_all, choose_quantity="amplitude", save_name="modeconv1_optimized_output_field_allSource_amplitude", plot_zoom_r=zoom_core_diameter)
         make_polarPlot_of(verify_out_field_all, choose_quantity="phase", save_name="modeconv1_optimized_output_field_allSource_phase", plot_zoom_r=zoom_core_diameter)
 
-        #make 1D slices of target/outpu fields to compare
+        #make 1D slices of target/output fields to compare
         slice_y_index = Ny//2
         slice_x = xs * 1e6
         slice_target_1 = target_Efield_1.reshape((Nx, Ny))[slice_y_index,:]

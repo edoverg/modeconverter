@@ -12,6 +12,7 @@ import nlopt
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 #set the global font size for all plots
 plt.rcParams.update({'font.size': 14})
 
@@ -101,6 +102,7 @@ P_2_dagger_nat = np.fft.ifftshift(P_2).T.conj()
 #Plot zoom parameters [um]
 zoom_x = 60
 zoom_y = 60
+zoom_core_diameter = 2 * 6
 full_view_x = size_x * 1e6 / 2
 full_view_y = size_y * 1e6 / 2
 ##############################
@@ -121,14 +123,23 @@ def get_pattern() -> np.ndarray:
 
     return pattern.flatten()
 
-def get_fiber_mode_pattern(n_mode_sel):
-    '''Returns the target fiber mode pattern'''
-    print("Computing target fiber mode pattern for LP %d1" % n_mode_sel)
+def get_fiber_mode_pattern(mode_list:list)->list:
+    '''Returns the fiber mode pattern for the selected n index.
+    Args:
+        mode_list: the list of the selected fiber mode indices
+    Returns:
+        The fiber mode patterns corresponding to the selected indices returned 
+        as a list of 2D arrays with the same order as the input mode_list
+    '''
+    #check if the modes in mode_list have already been compute by checking
+    #the saved files in the 'results' folder. If they have, load them from the files. If not, compute them and save them to the files.
+    
+    print("Computing fiber patterns for mode indices: ", mode_list)
     lda = 1.55e-6
 
-    n_co = 1.4630
-    n_cl = 1.4585
-    a = 6e-6
+    n_co = 1.4630 #core refractive index
+    n_cl = 1.4585 #cladding refractive index
+    a = 6e-6 #fiber core radius
 
     #find the v parameter range that corresponds to the 1550 nm wavelength
     #v_1550 = 2 * np.pi * a / lda * np.sqrt(n_co**2 - n_cl**2)
@@ -138,15 +149,13 @@ def get_fiber_mode_pattern(n_mode_sel):
     V_list = np.linspace(2, 5.1, 20)
     V_obs = v_1550
     #b, V = np.meshgrid(b_list, V_list)
-    n_list = [0,1,2]
 
     b_solutions_at_V_obs = []
-    for n in n_list:
+    for n in mode_list:
         b_solutions = []    
         for V in V_list:
             LHS = np.sqrt(1-b) * jv(n+1, V * np.sqrt(1-b)) / jv(n, V * np.sqrt(1-b))
             RHS = np.sqrt(b) * kv(n+1, V * np.sqrt(b)) / kv(n, V * np.sqrt(b))
-            
 
             intersection_index = np.argmax(np.where(np.isclose(LHS, RHS, atol=0.000001),1,0).flatten())
 
@@ -156,29 +165,32 @@ def get_fiber_mode_pattern(n_mode_sel):
         RHS = np.sqrt(b) * kv(n+1, V_obs * np.sqrt(b)) / kv(n, V_obs * np.sqrt(b))
         b_solutions_at_V_obs.append(b[np.argmax(np.where(np.isclose(LHS, RHS, atol=0.00001),1,0).flatten())])
 
-    b_mode_sel = b_solutions_at_V_obs[n_mode_sel]
+    output_patterns = []
+    for enum_index,n_mode_sel in enumerate(mode_list):
+        b_mode_sel = b_solutions_at_V_obs[enum_index]
 
-    k_co = 2 * np.pi / lda * n_co
-    k_cl = 2 * np.pi / lda * n_cl
+        k_co = 2 * np.pi / lda * n_co
+        k_cl = 2 * np.pi / lda * n_cl
 
-    beta = np.sqrt(b_mode_sel * (k_co**2 - k_cl**2) + k_cl**2)
+        beta = np.sqrt(b_mode_sel * (k_co**2 - k_cl**2) + k_cl**2)
 
-    chi_co = v_1550 * np.sqrt(1 - b_mode_sel) / a
-    chi_cl = v_1550 * np.sqrt(b_mode_sel) / a
+        chi_co = v_1550 * np.sqrt(1 - b_mode_sel) / a
+        chi_cl = v_1550 * np.sqrt(b_mode_sel) / a
 
-    E_field = np.zeros_like(X, dtype=complex)
+        E_field = np.zeros_like(X, dtype=complex)
 
-    for i in range(Nx):
-        for j in range(Ny):
-            r = np.sqrt(X[i,j]**2 + Y[i,j]**2)
-            if r < 10*a:
-                phi = np.arctan2(Y[i,j], X[i,j])
-                if r < a:#inside core
-                    E_field[i,j] = jv(n_mode_sel,chi_co * r) / jv(n_mode_sel, chi_co * a) * np.cos(n_mode_sel * phi)
-                else:#outside core
-                    E_field[i,j] = kv(n_mode_sel, chi_cl * r) / kv(n_mode_sel, chi_cl * a) * np.cos(n_mode_sel * phi)
+        for i in range(Nx):
+            for j in range(Ny):
+                r = np.sqrt(X[i,j]**2 + Y[i,j]**2)
+                if r < 10*a:
+                    phi = np.arctan2(Y[i,j], X[i,j])
+                    if r < a:#inside core
+                        E_field[i,j] = jv(n_mode_sel,chi_co * r) / jv(n_mode_sel, chi_co * a) * np.cos(n_mode_sel * phi)
+                    else:#outside core
+                        E_field[i,j] = kv(n_mode_sel, chi_cl * r) / kv(n_mode_sel, chi_cl * a) * np.cos(n_mode_sel * phi)
 
-    return E_field
+        output_patterns.append(E_field)
+    return output_patterns
 
 def get_source_field(beam_waist,center_x=0,center_y=0,):
     '''Returns a normalized Gaussian source field for a given beam waist. Normalization consists in scaling
@@ -211,7 +223,7 @@ def propagate_source(source_to_propagate):
     propagated_source_field = ifft_operator.output_array.flatten()
     return propagated_source_field
 
-def make_1Dplot_of(x_axis,y_axis,plot_zoom_x=zoom_x,save_name="plot_1D",) -> None:
+def make_1Dplot_of(x_axis,y_axis,legend_labels,plot_zoom_x=zoom_x,save_name="plot_1D",) -> None:
     '''Makes a 1D plot of the given data and saves it to a PDF file.
     Args:
         x_axis: list of x-axis data (list of 1D arrays)
@@ -225,8 +237,12 @@ def make_1Dplot_of(x_axis,y_axis,plot_zoom_x=zoom_x,save_name="plot_1D",) -> Non
         raise ValueError("Lists x_axis and y_axis must have the same length.")
     plt.figure()
     for i in range(len(x_axis)):
-        plt.plot(x_axis[i], y_axis[i])
-    plt.xlabel("x [um]")
+        if len(legend_labels) != len(x_axis):
+            raise ValueError("Length of legend_labels must match the number of plots.")
+        else:
+            plt.plot(x_axis[i], y_axis[i], label=legend_labels[i])
+
+    plt.legend()
     plt.tight_layout()
     plt.savefig("results/" + save_name + ".pdf")
     plt.xlim(-plot_zoom_x, plot_zoom_x)
@@ -263,6 +279,37 @@ def make_2Dplot_of(given_field,choose_quantity="amplitude",save_name="plot",plot
     plt.tight_layout()
     plt.savefig("results/" + save_name + ".pdf")
     plt.close()
+
+def make_polarPlot_of(given_field,choose_quantity="amplitude",save_name="polar_plot",plot_zoom_r=zoom_x) -> None:
+    '''Makes a polar plot of the given 2D field in a zoomed region. 
+    Saves the plot with the chosen filename to a PDF file. 
+    Args:
+        given_field: the 2D field to be plotted (flattened)
+        choose_quantity: either "amplitude" or "phase" to select quantity to plot
+        save_name: name of the file to save the plot (without extension)
+        plot_zoom_r: zoom level for the radial axis (in micrometers)
+    Returns:
+        None
+    '''
+    _, ax = plt.subplots(figsize=(6, 6))
+    if choose_quantity == "amplitude":
+        given_field_2d = np.abs(given_field.reshape((Nx, Ny))) #assure the field is 2D before plotting
+        im = ax.imshow(given_field_2d,origin='lower')
+    elif choose_quantity == "phase":
+        given_field_2d = (np.angle(given_field.reshape((Nx, Ny))) + 2*np.pi) % (2*np.pi)#assure the field is 2D before plotting
+        im = ax.imshow(given_field_2d, cmap='hsv', vmin=0, vmax=2*np.pi)
+    else:
+        raise ValueError("choose_quantity must be either 'amplitude' or 'phase'")
+    
+    center_x, center_y = Nx//2, Ny//2
+    radius = plot_zoom_r * 1e-6 / (size_x/2) * (Nx/2) #convert zoom in um to pixels
+    circle = patches.Circle((center_x, center_y), radius, transform=ax.transData)
+    im.set_clip_path(circle)
+    ax.set_xlim(center_x - radius, center_x + radius)
+    ax.set_ylim(center_y - radius, center_y + radius)
+    ax.axis('off')
+    cbar = plt.colorbar(im, ax=ax)
+    plt.savefig("results/" + save_name + ".pdf")
 
 def shift_spatial_grid(shift_amount_x,shift_amount_y):
     '''Shifts the spatial grid by a given amount. This is useful for centering the source field on the metasurface.
@@ -337,8 +384,7 @@ input_field_list = [input_field_1, input_field_2]
 ###########################
 #initialize target field
 target_mode_indices = [1,2] 
-fiber_mode_pattern_1 = get_fiber_mode_pattern(target_mode_indices[0])
-fiber_mode_pattern_2 = get_fiber_mode_pattern(target_mode_indices[1])
+fiber_mode_pattern_1, fiber_mode_pattern_2 = get_fiber_mode_pattern(target_mode_indices)
 
 target_Efield_1_2d = fiber_mode_pattern_1 / np.sqrt(np.sum(np.abs(fiber_mode_pattern_1)**2))
 target_Efield_1 =  target_Efield_1_2d.flatten() #normalized target field (intensity = 1)
@@ -458,7 +504,8 @@ def value_and_grad(weights):
     
     return np.array(values), np.array(gradients)
 
-
+obj_values1 = []
+obj_values2 = []
 def epigraph_constraint(result,epigraph_and_weights,gradient)->None:
     '''Constraint function for the epigraph formulation
     Args:
@@ -472,6 +519,8 @@ def epigraph_constraint(result,epigraph_and_weights,gradient)->None:
     weights = epigraph_and_weights[1:]
 
     obj_val, grad = value_and_grad(weights)
+    obj_values1.append(obj_val[0])
+    obj_values2.append(obj_val[1])
 
     if gradient.size > 0:
         gradient[:,0] = -1
@@ -498,23 +547,12 @@ def obj_fun(epigraph_and_weights, grad):
         grad[1:] = 0
     
     opt_history.append(epigraph)
-
-    plt.figure()
-    plt.plot(opt_history)
-    plt.xlabel('Iteration')
-    plt.ylabel('Epigraph Value')
-    plt.title('Optimization History')
-    plt.tight_layout()
-    plt.savefig("results/modeconv1_optimization_history.pdf")
-    plt.close()
+    #make a 1d plot of the optimization history together with the objective values
+    make_1Dplot_of(x_axis=[np.arange(len(obj_values1)), np.arange(len(obj_values2)), np.arange(len(opt_history))], y_axis=[obj_values1, obj_values2, opt_history], legend_labels=["ob1","ob2","t"], save_name="optimization_history", plot_zoom_x=len(opt_history))
 
     return epigraph
 
-if __name__ == "__main__":
-    ###########################
-    #initialize the normalized phase masks and global phase mask
-    w_norm = np.zeros((2*S)) #concatenated normalized parameters for both masks
-
+def initialize_masks():
     X1,Y1 = shift_spatial_grid(-source_spacing/2,0)
     rho1 = np.sqrt(X1**2 + Y1**2)
     circular_mask_1 = np.where(rho1.flatten() < 10*6e-6, 1, 0)
@@ -525,7 +563,7 @@ if __name__ == "__main__":
 
     target_pattern_1_norm_phase = (np.angle(target_Efield_1) + 2 * np.pi) % (2 * np.pi) / (2*np.pi)
     target_pattern_1_norm_phase = np.roll(target_pattern_1_norm_phase, shift=int(source_spacing/sampling_period/2), axis=0)
-    
+
     target_pattern_2_norm_phase = (np.angle(target_Efield_2) + 2 * np.pi) % (2 * np.pi) / (2*np.pi)
     target_pattern_2_norm_phase = np.roll(target_pattern_2_norm_phase, shift=-int(source_spacing/sampling_period/2), axis=0)
     #on metasurface 1, set initial guess on normalized phase elements
@@ -533,7 +571,13 @@ if __name__ == "__main__":
     #on metasurface 2, generate random initial guess for normalized phase elements
     #w_norm[S:] += np.random.rand(S) * circular_mask_1 + np.random.rand(S) * circular_mask_2
 
+if __name__ == "__main__":
+    ###########################
+    #initialize the normalized phase masks and global phase mask
+    w_norm = np.zeros((2*S)) #concatenated normalized parameters for both masks
+    initialize_masks()
     phase_mask = phase_given_w(w_norm)
+
     #make an initial plot of the phase masks
     make_2Dplot_of(phase_mask[:S].reshape((Nx, Ny)), choose_quantity="phase_mask", save_name="initial_phase_mask_1", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
     make_2Dplot_of(phase_mask[S:].reshape((Nx, Ny)), choose_quantity="phase_mask", save_name="initial_phase_mask_2", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
@@ -570,7 +614,7 @@ if __name__ == "__main__":
     solver.set_maxeval(opt_max_eval)
     solver.set_param("dual_ftol_rel", 1e-5)
     solver.set_param("verbosity", 1)
-    solver.set_param("inner_maxeval", 5)
+    solver.set_param("inner_maxeval", 10)
 
     print("Starting optimization...")
     start = True
@@ -585,12 +629,12 @@ if __name__ == "__main__":
     all_source_on_field = input_field_list[0] + input_field_list[1]
     verify_out_field_all = forward_propagate(all_source_on_field, opt_weights)[-1]
     
-    make_2Dplot_of(verify_out_field_1, choose_quantity="amplitude", save_name="modeconv1_optimized_output_field_source1_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
-    make_2Dplot_of(verify_out_field_1, choose_quantity="phase", save_name="modeconv1_optimized_output_field_source1_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
-    make_2Dplot_of(verify_out_field_2, choose_quantity="amplitude", save_name="modeconv1_optimized_output_field_source2_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
-    make_2Dplot_of(verify_out_field_2, choose_quantity="phase", save_name="modeconv1_optimized_output_field_source2_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
-    make_2Dplot_of(verify_out_field_all, choose_quantity="amplitude", save_name="modeconv1_optimized_output_field_allSource_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
-    make_2Dplot_of(verify_out_field_all, choose_quantity="phase", save_name="modeconv1_optimized_output_field_allSource_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+    make_polarPlot_of(verify_out_field_1, choose_quantity="amplitude", save_name="modeconv1_optimized_output_field_source1_amplitude", plot_zoom_r=zoom_core_diameter)
+    make_polarPlot_of(verify_out_field_1, choose_quantity="phase", save_name="modeconv1_optimized_output_field_source1_phase", plot_zoom_r=zoom_core_diameter)
+    make_polarPlot_of(verify_out_field_2, choose_quantity="amplitude", save_name="modeconv1_optimized_output_field_source2_amplitude", plot_zoom_r=zoom_core_diameter)
+    make_polarPlot_of(verify_out_field_2, choose_quantity="phase", save_name="modeconv1_optimized_output_field_source2_phase", plot_zoom_r=zoom_core_diameter)
+    make_polarPlot_of(verify_out_field_all, choose_quantity="amplitude", save_name="modeconv1_optimized_output_field_allSource_amplitude", plot_zoom_r=zoom_core_diameter)
+    make_polarPlot_of(verify_out_field_all, choose_quantity="phase", save_name="modeconv1_optimized_output_field_allSource_phase", plot_zoom_r=zoom_core_diameter)
 
     #save the output fields for later use
     saveFields = False
@@ -602,13 +646,12 @@ if __name__ == "__main__":
     # Reshape fields to 2D for visualization
     phase_mask_1 = phase_given_w(epigraph_and_weights[1:S+1]).reshape((Nx, Ny))
     phase_mask_2 = phase_given_w(epigraph_and_weights[S+1:]).reshape((Nx, Ny))    
-    phase_mask_zoom = 150
     # Plot: Phase masks
-    make_2Dplot_of(phase_mask_1, choose_quantity="phase_mask", save_name="phase_mask_1", plot_zoom_x=phase_mask_zoom, plot_zoom_y=phase_mask_zoom)
-    make_2Dplot_of(phase_mask_2, choose_quantity="phase_mask", save_name="phase_mask_2", plot_zoom_x=phase_mask_zoom, plot_zoom_y=phase_mask_zoom)
+    make_2Dplot_of(phase_mask_1, choose_quantity="phase_mask", save_name="phase_mask_1", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
+    make_2Dplot_of(phase_mask_2, choose_quantity="phase_mask", save_name="phase_mask_2", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
     
     #save the phase masks for later use
-    saveMasks = True
+    saveMasks = False
     if saveMasks:
         np.savetxt("results/optimized_phase_mask_1.txt", phase_mask_1)
         np.savetxt("results/optimized_phase_mask_2.txt", phase_mask_2)
