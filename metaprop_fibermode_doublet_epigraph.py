@@ -43,7 +43,7 @@ sampling_period = xs[1] - xs[0]
 
 d0 = 345e-6 #propagation distance: source - MS1
 d1 = 500e-6 #propagation distance: MS1 - MS2
-d2 = 500e-6 #propagation distance: MS2 - target
+d2 = 300e-6 #propagation distance: MS2 - target
 d = [d1, d2] #d = [d1,d2] d1:distance MS1-MS2, d2: distance MS2-target
 
 phase_min = 0
@@ -53,12 +53,13 @@ phase_max = 2 * np.pi
 ##############################
 #optimization algorithm
 epigraph_tolerance = np.array([1e-4]*2)
+#epigraph_tolerance = np.array([1e-4])
 ##############################
 
 ##############################
 #Source
 beam_waist = 9e-6
-source_spacing = 150e-6
+source_spacing = 300e-6
 ##############################
 
 ##############################
@@ -201,7 +202,7 @@ def get_source_field(beam_waist,center_x=0,center_y=0,):
     return gaussian_field_normalized
 
 def propagate_source(source_to_propagate):
-    '''Returns the propagated source field just before metasurface 1 (MS1). This involves propagating the 
+    '''Returns the propagated source field (flattened) just before metasurface 1 (MS1). This involves propagating the 
     source for a distance d0: from its plane of definition up to MS1.'''
     fft_input_array[:,:] = source_to_propagate.reshape((Nx, Ny))
     fft_operator()
@@ -330,6 +331,7 @@ make_2Dplot_of(input_field_2_2d, choose_quantity="phase", save_name="input_field
 
 #list of input fields to be propagated within the optimization loop
 input_field_list = [input_field_1, input_field_2]
+#input_field_list = [input_field_1]
 ###########################
 
 ###########################
@@ -351,6 +353,7 @@ make_2Dplot_of(target_Efield_2_2d, choose_quantity="amplitude", save_name="targe
 make_2Dplot_of(target_Efield_2_2d, choose_quantity="phase", save_name="target_field_2_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
 
 target_field_list = [target_Efield_1, target_Efield_2]
+#target_field_list = [target_Efield_1]
 ###########################
 
 def forward_propagate(input_field:np.ndarray,weights:np.ndarray) -> np.ndarray:
@@ -361,37 +364,37 @@ def forward_propagate(input_field:np.ndarray,weights:np.ndarray) -> np.ndarray:
     print("Starting propagating...")
     intermediate_fields = [None, None]
     start_time = time.time()
-    #phase_mask = phase_given_w(weights)
-    fft_input_array[:,:] = (input_field * np.exp(1j * phase_mask[:S])).reshape((Nx, Ny))
+    phase_mask = phase_given_w(weights)
+    fft_input_array[:,:] = np.fft.ifftshift((input_field * np.exp(1j * phase_mask[:S])).reshape((Nx, Ny)))
     fft_operator()
-    
-    print("BEFORE")
+    #print("BEFORE")
     fft_power = np.sum(np.abs(fft_operator.output_array)**2)/S
     non_propagating_mask = np.where((wavelength * nu_parallel)**2 > 1, 0, 1)
     non_propagating_mask = np.fft.ifftshift(non_propagating_mask)
     propagating_power = np.sum(np.abs(fft_operator.output_array * non_propagating_mask)**2)/S
-    print("FFT power: %.4e, Propagating power: %.4e, Non-propagating power: %.4e" % (fft_power, propagating_power, fft_power - propagating_power))
-    
+    #print("FFT power: %.4e, Propagating power: %.4e, Non-propagating power: %.4e" % (fft_power, propagating_power, fft_power - propagating_power))
+
     #FIRST PROPAGATION
     ifft_input_array[:,:] = fft_operator.output_array * P_1_nat #element wise product
-    print("AFTER")
+    #print("AFTER")
 
     fft_power = np.sum(np.abs(ifft_operator.input_array)**2)/S
     non_propagating_mask = np.where((wavelength * nu_parallel)**2 > 1, 0, 1)
     non_propagating_mask = np.fft.ifftshift(non_propagating_mask)
     propagating_power = np.sum(np.abs(ifft_operator.input_array * non_propagating_mask)**2)/S
-    print("FFT power: %.4e, Propagating power: %.4e, Non-propagating power: %.4e" % (fft_power, propagating_power, fft_power - propagating_power))
+    #print("FFT power: %.4e, Propagating power: %.4e, Non-propagating power: %.4e" % (fft_power, propagating_power, fft_power - propagating_power))
     
     ifft_operator()
-    intermediate_fields[0] = ifft_operator.output_array.copy()
-    print("Field intensity after first phase mask and propagation: %.4e" % np.sum(np.abs(intermediate_fields[0])**2))
+    intermediate_fields[0] = np.fft.fftshift(ifft_operator.output_array.copy())
+    #print("Field intensity after first phase mask and propagation: %.4e" % np.sum(np.abs(intermediate_fields[0])**2))
 
-    fft_input_array[:,:] = (ifft_operator.output_array * np.exp(1j * phase_mask[S:].reshape((Nx, Ny))))
+    fft_input_array[:,:] = np.fft.ifftshift((np.fft.fftshift(ifft_operator.output_array) * np.exp(1j * phase_mask[S:].reshape((Nx, Ny)))))
     fft_operator()
+
     #SECOND PROPAGATION
     ifft_input_array[:,:] = fft_operator.output_array * P_2_nat #element wise product
     ifft_operator()
-    intermediate_fields[1] = ifft_operator.output_array.copy()
+    intermediate_fields[1] = np.fft.fftshift(ifft_operator.output_array.copy())
     
     end_time = time.time()
     print("Propagation finished in {:.6f} seconds.".format(end_time - start_time))
@@ -413,19 +416,19 @@ def adjoint_propagate(input_field_2d,target_Efield_2d,intermediate_fields):
     Phi_2_dagger = np.exp(-1j * phase_mask[S:]).reshape((Nx, Ny))
 
     #compute the adjoint source
-    fft_input_array[:,:] = np.sum(intermediate_fields[1] * np.conj(target_Efield_2d)) * target_Efield_2d
+    fft_input_array[:,:] = np.fft.ifftshift(np.sum(intermediate_fields[1] * np.conj(target_Efield_2d)) * target_Efield_2d)
     fft_operator()
     ifft_input_array[:,:] = fft_operator.output_array * P_2_dagger_nat
     ifft_operator()
-    fft_input_array[:,:] = ifft_operator.output_array * Phi_2_dagger
+    fft_input_array[:,:] = np.fft.ifftshift(np.fft.fftshift(ifft_operator.output_array) * Phi_2_dagger)
 
-    grad_C_phi_2 = 2 * np.real(-1j * intermediate_fields[0].T.conj() * fft_input_array).flatten() 
+    grad_C_phi_2 = 2 * np.real(-1j * intermediate_fields[0].conj() * np.fft.fftshift(fft_input_array)).flatten() 
 
     fft_operator()
     ifft_input_array[:,:] = fft_operator.output_array * P_1_dagger_nat #element wise
     ifft_operator()
 
-    grad_C_phi_1 = 2 * np.real(-1j * input_field_2d.T.conj() * ifft_operator.output_array * Phi_1_dagger).flatten()
+    grad_C_phi_1 = 2 * np.real(-1j * input_field_2d.conj() * np.fft.fftshift(ifft_operator.output_array) * Phi_1_dagger).flatten()
     
     end_time = time.time()
     print("Adjoint finished in {:.6f} seconds.".format(end_time - start_time))
@@ -433,8 +436,8 @@ def adjoint_propagate(input_field_2d,target_Efield_2d,intermediate_fields):
 
 
 def value_and_grad(weights):
-    values = [None, None]
-    gradients = [None, None]
+    values = []
+    gradients = []
 
     phase_mask[:] = phase_given_w(weights) #update phase mask in place
     for i, input_field in enumerate(input_field_list):
@@ -445,11 +448,13 @@ def value_and_grad(weights):
         C_s = np.abs(np.sum(intermediate_fields[-1].flatten() * circular_mask * np.conj(target_field_list[i]))) ** 2
         C = np.real(np.sum(C_s))
 
-        values[i] = C
-        gradients[i] = adjoint_propagate(
-            input_field_2d = input_field.reshape((Nx, Ny)), 
-            target_Efield_2d = target_field_list[i].reshape((Nx, Ny)),
-            intermediate_fields = intermediate_fields)
+        values.append(-C)
+        gradients.append(
+            adjoint_propagate(
+                input_field_2d = input_field.reshape((Nx, Ny)), 
+                target_Efield_2d = target_field_list[i].reshape((Nx, Ny)),
+                intermediate_fields = intermediate_fields)
+        )
     
     return np.array(values), np.array(gradients)
 
@@ -470,10 +475,10 @@ def epigraph_constraint(result,epigraph_and_weights,gradient)->None:
 
     if gradient.size > 0:
         gradient[:,0] = -1
-        gradient[:,1:] = grad * (2*np.pi)
+        gradient[:,1:] = - grad * (2*np.pi)
 
-    #we take the negative of obj_val because we are minimizing the epigraph
-    result[:] = -np.real(obj_val) - epigraph
+    #result of the evaluation of this constraint function
+    result[:] = np.real(obj_val) - epigraph
 
 opt_history = []
 def obj_fun(epigraph_and_weights, grad):
@@ -526,7 +531,7 @@ if __name__ == "__main__":
     #on metasurface 1, set initial guess on normalized phase elements
     w_norm[:S] += circular_mask_1 * target_pattern_1_norm_phase + circular_mask_2 * target_pattern_2_norm_phase
     #on metasurface 2, generate random initial guess for normalized phase elements
-    w_norm[S:] += np.random.rand(S) * circular_mask_1 + np.random.rand(S) * circular_mask_2
+    #w_norm[S:] += np.random.rand(S) * circular_mask_1 + np.random.rand(S) * circular_mask_2
 
     phase_mask = phase_given_w(w_norm)
     #make an initial plot of the phase masks
@@ -563,8 +568,9 @@ if __name__ == "__main__":
         epigraph_tolerance,
     )
     solver.set_maxeval(opt_max_eval)
-    solver.set_param("dual_ftol_rel", 1e-7)
-    solver.set_param("verbosity",1)
+    solver.set_param("dual_ftol_rel", 1e-5)
+    solver.set_param("verbosity", 1)
+    solver.set_param("inner_maxeval", 5)
 
     print("Starting optimization...")
     start = True
@@ -594,8 +600,8 @@ if __name__ == "__main__":
         np.savetxt("results/modeconv1_optimized_output_field_allSource.txt", verify_out_field_all.reshape((Nx, Ny)))
   
     # Reshape fields to 2D for visualization
-    phase_mask_1 = phase_given_w(epigraph_and_weights[1:S]).reshape((Nx, Ny))
-    phase_mask_2 = phase_given_w(epigraph_and_weights[S:]).reshape((Nx, Ny))    
+    phase_mask_1 = phase_given_w(epigraph_and_weights[1:S+1]).reshape((Nx, Ny))
+    phase_mask_2 = phase_given_w(epigraph_and_weights[S+1:]).reshape((Nx, Ny))    
     phase_mask_zoom = 150
     # Plot: Phase masks
     make_2Dplot_of(phase_mask_1, choose_quantity="phase_mask", save_name="phase_mask_1", plot_zoom_x=phase_mask_zoom, plot_zoom_y=phase_mask_zoom)
