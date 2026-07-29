@@ -51,8 +51,8 @@ rho = np.sqrt(X**2 + Y**2)
 
 sampling_period = xs[1] - xs[0]
 
-d0 = 345e-6 #propagation distance: source - MS1
-d1 = 100e-6 #propagation distance: MS1 - MS2
+d0 = 345-6 #propagation distance: source - MS1
+d1 = 500e-6 #propagation distance: MS1 - MS2
 d2 = 300e-6 #propagation distance: MS2 - target
 d = [d1, d2] #d = [d1,d2] d1:distance MS1-MS2, d2: distance MS2-target
 

@@ -1,6 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+import tidy3d as td
+from tidy3d import web
+
 wavelength = 1.55e-6
 k0 = 2 * np.pi / wavelength
 
@@ -27,9 +30,10 @@ rho = np.sqrt(X**2 + Y**2)
 
 sampling_period = xs[1] - xs[0]
 
-z_prop = 1000e-6 #345e-6 #propagation distance
+#z_prop = 2.8e-6 #345e-6 #propagation distance
+z_prop = 10e-6
 
-beam_waist = 6e-6
+beam_waist = 2e-6
 gaussian_field = np.exp(-rho**2 / (beam_waist)**2) #Gaussian input field, flattened
 input_field = gaussian_field.flatten() #not normalized input field
 
@@ -97,12 +101,10 @@ if __name__ == "__main__":
     gaussian_profile = (beam_waist / w_z) * np.exp(- xs**2 / w_z**2)
     radius_of_curvature = z * (1 + (rayleigh_range / z)**2)
     gaussian_phase = (k0 * z + k0 * xs**2 / (2 * radius_of_curvature) - np.arctan(z / rayleigh_range)) % (2*np.pi)
-    #gaussian_profile = gaussian_profile / np.sqrt(np.sum(gaussian_profile**2)) #normalize the gaussian profile to have power = 1
-    #make this subplot take two places in the figure
-    
+
     plt.subplot(4, 2, 3)
-    plt.plot(xs*1e6, np.abs(output_field.reshape((Nx,Ny))[Nx//2, :])**2 / np.max(np.abs(output_field.reshape((Nx,Ny))[Nx//2, :])**2), 'b-', label='output')
-    plt.plot(xs*1e6, gaussian_profile**2 / np.max(gaussian_profile**2), 'r--', label='theory')
+    plt.plot(xs*1e6, np.abs(output_field.reshape((Nx,Ny))[Nx//2, :])**2, 'b-', label='output')
+    plt.plot(xs*1e6, gaussian_profile**2, 'r--', label='theory')
     plt.xlabel('x (um)')
     plt.ylabel('Intensity (a.u.)')
     plt.legend(loc='center left')
@@ -132,4 +134,67 @@ if __name__ == "__main__":
 
 
     plt.tight_layout()
-    plt.savefig("propagation_verification.pdf")
+    #plt.savefig("propagation_verification.pdf")
+
+    #load FDTD data from file
+    lambda0 = 1.55
+    freq0 = td.C_0 / lambda0 
+    # Load the job metadata from file.
+    job_loaded = web.Job.from_file("tidy3d/data/job.json")
+    sim_data = job_loaded.load(path="tidy3d/data/testing_gauss_prop.hdf5")
+
+    
+    nf_field = sim_data["monitor_nf"].Ex.sel(f=freq0, z=2, method="nearest")
+    src_field = sim_data["monitor_src"].Ex.sel(f=freq0, z=-1+1e-9, method="nearest")
+
+    f = 10
+    src_monitor_position = -0.8
+    prj_field = sim_data["monitor_projection"].fields_cartesian.Ex.sel(f=freq0, z=f+src_monitor_position, method="nearest")
+
+    fig, ax = plt.subplots(1,2)
+    
+    x_nf = nf_field.coords['x'].values
+    x_src = src_field.coords['x'].values
+    x_prj = prj_field.coords['x'].values
+    N_nf_field = nf_field.shape[0]
+    N_prj_field = prj_field.shape[0]
+
+    nf_field_phase = ((np.angle(nf_field) + 2 * np.pi) % (2 * np.pi))[N_nf_field//2,:]
+    nf_field_mag = (np.abs(nf_field) / np.max(np.abs(nf_field)))[N_nf_field//2,:]
+    src_field_phase = ((np.angle(src_field) + 2 * np.pi) % (2 * np.pi))[N_nf_field//2,:]
+    src_field_mag = (np.abs(src_field) / np.max(np.abs(src_field)))[N_nf_field//2,:]
+
+    prj_field_phase = ((np.angle(prj_field) + 2 * np.pi) % (2 * np.pi))[N_prj_field//2,:]
+    prj_field_mag = (np.abs(prj_field) / np.max(np.abs(prj_field)))[N_prj_field//2,:]
+
+    output_field_2d = output_field.reshape((Nx, Ny))
+    output_field_mag = (np.abs(output_field_2d) / np.max(np.abs(output_field_2d)))[Nx//2,:]
+    output_field_phase = ((np.angle(output_field_2d) + 2 * np.pi) % (2 * np.pi))[Nx//2,:]
+
+    #ax[0].plot(x_nf,nf_field_mag, '.b', label="FDTD magnitude")
+    ax[0].plot(xs*1e6,output_field_mag, 'r', label="ASM magnitude")
+    ax[0].plot(xs*1e6,gaussian_profile/np.max(gaussian_profile), '-.g', label="theory magnitude")
+    ax[0].plot(x_prj,prj_field_mag, label="FDTD FF")
+    ax[0].set_xlim(-5,5)
+    ax[0].legend(loc='lower center')
+    
+    true_phase = nf_field_phase - src_field_phase
+    true_phase = (true_phase + 2 * np.pi) % (2 * np.pi)
+
+    #interpolate prj_field phase and src_field phase to the same x values of prj_field
+    
+    src_field_phase_interp = np.interp(x_prj, x_src, src_field_phase)
+
+    true_phase_ff = prj_field_phase - src_field_phase_interp
+    true_phase_ff = (true_phase_ff + 2 * np.pi) % (2 * np.pi)
+
+    #ax[1].plot(x_nf,true_phase, '.b', label="FDTD phase")
+    ax[1].plot(xs*1e6,output_field_phase, 'r', label="ASM phase")
+    ax[1].plot(xs*1e6,gaussian_phase, '-.g', label="theory phase")
+    ax[1].plot(x_prj,true_phase_ff, label="FDTD FF phase")
+
+    ax[1].set_xlim(-5,5)
+    ax[1].legend()
+
+    #plt.show()
+    plt.savefig("asm_fdtd_comparison.pdf")

@@ -53,6 +53,7 @@ phase_max = 2 * np.pi
 ##############################
 #Source
 beam_waist = 4e-6
+source_spacing = 300e-6
 ##############################
 
 ##############################
@@ -93,8 +94,8 @@ P_2_dagger_nat = np.fft.ifftshift(P_2).T.conj()
 
 ##############################
 #Plot zoom parameters [um]
-zoom_x = 160
-zoom_y = 160
+zoom_x = 200
+zoom_y = 200
 all_view_x = size_x * 1e6 / 2
 all_view_y = size_y * 1e6 / 2
 ##############################
@@ -275,7 +276,6 @@ def make_2Dplot_of(given_field,choose_quantity="amplitude",save_name="plot",plot
 
 ###########################
 #initialize source field
-source_spacing = 120e-6
 source_field = get_source_field(beam_waist,center_x=source_spacing/2,center_y=0)
 source_field_2d = source_field.reshape((Nx, Ny)) #reshape to 2D for plotting
 #source field integrated intensity
