@@ -25,6 +25,7 @@ from smt.design_space import (
     DesignSpace,
 ) 
 
+
 ##############################
 #physics and simulation domain
 wavelength = 1.55e-6
@@ -81,6 +82,15 @@ ifft_operator = pyfftw.FFTW(ifft_input_array, ifft_output_array, axes=(0,1), dir
 ##############################
 
 ##############################
+#Plot zoom parameters [um]
+zoom_x = 60
+zoom_y = 60
+zoom_core_diameter = 2 * 6
+full_view_x = size_x * 1e6 / 2
+full_view_y = size_y * 1e6 / 2
+##############################
+
+##############################
 #setting up spatial frequencies
 ks = 2 * np.pi / sampling_period
 kappas = np.arange(-Nx//2, Nx//2) * ks / Nx
@@ -104,15 +114,6 @@ P_1_dagger_nat = np.fft.ifftshift(P_1).T.conj()
 P_2_dagger_nat = np.fft.ifftshift(P_2).T.conj()
 ##############################
 
-##############################
-#Plot zoom parameters [um]
-zoom_x = 60
-zoom_y = 60
-zoom_core_diameter = 2 * 6
-full_view_x = size_x * 1e6 / 2
-full_view_y = size_y * 1e6 / 2
-##############################
-
 def update_phase_factors():
     print("Updating phase factors using d=",d)
     phase_factor_0[:,:] = k0 * d[0] * np.sqrt(1 - (wavelength * nu_parallel) ** 2 + 0*1j)
@@ -124,6 +125,11 @@ def update_phase_factors():
     phase_factor_2[:,:] = k0 * d[2] * np.sqrt(1 - (wavelength * nu_parallel) ** 2 + 0*1j)
     P_2[:,:] = np.exp(1j * phase_factor_2)
     P_2_nat[:,:] = np.fft.ifftshift(P_2)
+
+    P_1_dagger[:] = P_1.T.conj()
+    P_2_dagger[:] = P_2.T.conj()
+    P_1_dagger_nat[:] = np.fft.ifftshift(P_1).T.conj()
+    P_2_dagger_nat[:] = np.fft.ifftshift(P_2).T.conj()
 
 def update_input_fields():
     input_field_1[:] = propagate_source(source_field_1)
@@ -588,7 +594,7 @@ def obj_fun(epigraph_and_weights, grad):
     
     opt_history.append(epigraph)
     #make a 1d plot of the optimization history together with the objective values
-    #make_1Dplot_of(x_axis=[np.arange(len(obj_values1)), np.arange(len(obj_values2)), np.arange(len(opt_history))], y_axis=[obj_values1, obj_values2, opt_history], legend_labels=["ob1","ob2","t"], save_name="optimization_history", plot_zoom_x=len(opt_history))
+    make_1Dplot_of(x_axis=[np.arange(len(obj_values1)), np.arange(len(obj_values2)), np.arange(len(opt_history))], y_axis=[obj_values1, obj_values2, opt_history], legend_labels=["ob1","ob2","t"], save_name="optimization_history", plot_zoom_x=len(opt_history))
 
     return epigraph
 
@@ -771,4 +777,7 @@ if __name__ == "__main__":
     #if the results folder does not exist, create it
     if not os.path.exists('results'):
         os.makedirs('results')
+
+    
+
     run_ego()
