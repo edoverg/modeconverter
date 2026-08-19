@@ -20,8 +20,11 @@ from scipy.special import jv, kv
 
 import os
 
-if not os.path.exists("results"):
-    os.makedirs("results")
+save_folder = "results_sym"
+if not os.path.exists(save_folder):
+    os.makedirs(save_folder)
+
+
 
 ##############################
 #physics and simulation domain
@@ -287,7 +290,7 @@ def make_1Dplot_of(x_axis,y_axis,plot_zoom_x=zoom_x,save_name="plot_1D",) -> Non
     plt.xlabel("x [um]")
     plt.tight_layout()
     plt.xlim(-plot_zoom_x, plot_zoom_x)
-    plt.savefig("results/" + save_name + ".pdf")
+    plt.savefig(f"{save_folder}/" + save_name + ".pdf")
     plt.close()
 
 def make_2Dplot_of(given_field,choose_quantity="amplitude",save_name="plot",plot_zoom_x=zoom_x,plot_zoom_y=zoom_y) -> None:
@@ -319,7 +322,7 @@ def make_2Dplot_of(given_field,choose_quantity="amplitude",save_name="plot",plot
     plt.ylabel("y [um]")
     plt.colorbar()
     plt.tight_layout()
-    plt.savefig("results/" + save_name + ".pdf")
+    plt.savefig(f"{save_folder}/" + save_name + ".pdf")
     plt.close()
 
 def make_polarPlot_of(given_field,choose_quantity="amplitude",save_name="polar_plot",plot_zoom_r=zoom_x) -> None:
@@ -351,7 +354,32 @@ def make_polarPlot_of(given_field,choose_quantity="amplitude",save_name="polar_p
     ax.set_ylim(center_y - radius, center_y + radius)
     ax.axis('off')
     cbar = plt.colorbar(im, ax=ax)
-    plt.savefig("results/" + save_name + ".pdf")
+    plt.savefig(f"{save_folder}/" + save_name + ".pdf")
+
+def symmetrize(w, nx, ny):
+    '''
+    Takes an input array, turns it into a 2D array, and symmetrizes it along the x and y axes.
+    Returns the first quadrant of shape (nx,ny), flattened
+    '''
+    try:
+        w_2d = w.reshape((Nx, Ny))
+    except ValueError:
+        raise ValueError(f"Input array w cannot be reshaped to ({Nx}, {Ny}). Current shape: {w.shape}")
+    w_symm = np.zeros((nx, ny))
+    w_symm[:,:] = w_2d[:nx, :ny]
+    return w_symm.flatten()
+
+def expand_symmetrize(w_symm, nx, ny):
+    '''
+    Takes a symmetrized array of shape (nx, ny) and expands it to a full 2D array of shape (Nx, Ny) by mirroring, flattened.
+    '''
+    w_full = np.zeros((Nx, Ny))
+    w_full[:nx, :ny] = w_symm.reshape((nx, ny))
+    w_full[:nx, ny:] = np.flip(w_symm.reshape((nx, ny)), axis=1)
+    w_full[nx:, :ny] = np.flip(w_symm.reshape((nx, ny)), axis=0)
+    w_full[nx:, ny:] = np.flip(np.flip(w_symm.reshape((nx, ny)), axis=0), axis=1)
+    return w_full.flatten()
+
 ###########################
 #initialize source field
 source_field = get_source_field(beam_waist)
@@ -369,7 +397,7 @@ make_2Dplot_of(source_field_2d, choose_quantity="phase", save_name="source_field
 input_field = propagate_source(source_field)
 input_field_2d = input_field.reshape((Nx, Ny)) #reshape to 2D for plotting
 #save the input field to numpy array
-np.save("results/input_field.npy", input_field_2d)
+np.save(f"{save_folder}/input_field.npy", input_field_2d)
 #input field integrated intensity
 input_field_intensity = np.sum(np.abs(input_field)**2)
 print("Input field integrated intensity: %.4e" % input_field_intensity)
@@ -399,6 +427,12 @@ circular_mask_1 = np.where(rho.flatten() < output_fiber_core_diameter/3, 1, 0)
 #w_norm[:S] += circular_mask_1
 target_pattern_phase = (np.angle(target_Efield) + 2 * np.pi) % (2 * np.pi)*circular_mask_1 #make sure the phase is between 0 and 2pi
 w_norm[S:] += target_pattern_phase / (2 * np.pi) #normalize the target phase to be between 0 and 1
+
+w_norm_symm_1 = symmetrize(w_norm[:S], Nx//2, Ny//2)
+w_norm_symm_2 = symmetrize(w_norm[S:], Nx//2, Ny//2)
+
+w_norm_symm = np.concatenate((w_norm_symm_1, w_norm_symm_2), axis=0)
+
 phase_mask = phase_given_w(w_norm)
 
 #define bounding box for the optimization. The outer mask is fixed to zero phase, while the inner mask can vary between 0 and 2pi phase.
@@ -407,8 +441,11 @@ norm_phase_min = 0
 norm_phase_max = 1
 mask_buffer = 100e-6
 mask_upper_bounds = norm_phase_max * np.where((np.abs(X.flatten()) > size_x/2 - mask_buffer) | (np.abs(Y.flatten()) > size_y/2 - mask_buffer), 0, 1)
-mask_upper_bounds = np.concatenate((mask_upper_bounds, mask_upper_bounds),axis=0)
-mask_lower_bounds = np.zeros_like(mask_upper_bounds)
+mask_upper_bounds_symm = mask_upper_bounds.reshape((Nx,Ny))[:Nx//2, :Ny//2].flatten()
+
+mask_upper_bounds_symm = np.concatenate((mask_upper_bounds_symm, mask_upper_bounds_symm),axis=0)
+mask_lower_bounds_symm = np.zeros_like(mask_upper_bounds_symm)
+
 ###########################
 
 intermediate_fields = [None, None]
@@ -448,11 +485,23 @@ def forward_propagate() -> None:
     intermediate_fields[1] = np.fft.fftshift(ifft_operator.output_array.copy())
     
     end_time = time.time()
-    #make_2Dplot_of(intermediate_fields[0], choose_quantity="amplitude", save_name="intermediate_field_1_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
-    #make_2Dplot_of(intermediate_fields[1], choose_quantity="amplitude", save_name="intermediate_field_2_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
+    make_2Dplot_of(intermediate_fields[0], choose_quantity="amplitude", save_name="intermediate_field_1_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
+    make_2Dplot_of(intermediate_fields[1], choose_quantity="amplitude", save_name="intermediate_field_2_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
     
     print("Propagation finished in {:.6f} seconds.".format(end_time - start_time))
 
+
+def reduce_symmetrized_gradient(g_full, nx, ny):
+    g_2d = g_full.reshape((Nx, Ny))
+
+    g_reduced = (
+        g_2d[:nx, :ny]
+        + np.flip(g_2d[:nx, ny:], axis=1)
+        + np.flip(g_2d[nx:, :ny], axis=0)
+        + np.flip(np.flip(g_2d[nx:, ny:], axis=0), axis=1)
+    )
+
+    return g_reduced.flatten()
 
 def adjoint_propagate():
     '''Backpropagates the output field using the adjoint of the propagation matrix P.
@@ -482,9 +531,10 @@ def adjoint_propagate():
     
     end_time = time.time()
     print("Adjoint finished in {:.6f} seconds.".format(end_time - start_time))
-    return np.concatenate((grad_C_phi_1, grad_C_phi_2))
+    return grad_C_phi_1, grad_C_phi_2
 
 def _compute_cost():
+
     forward_propagate()
 
     output_field = intermediate_fields[-1].flatten()
@@ -507,9 +557,24 @@ def cost_fun(x, grad):
     Returns:
         The cost function value for the input parameter field x.
     '''
-    w_norm[:] = x
+    #since the objective function is to maximize the overlap, and the target mode is C4 symmetric, 
+    #we can let the algorithm optimize only a fourth of the phase mask and then synthetize automatically the remaining three quadrants.
+    #Since we have two metasurfaces, the total number of parameters the algorithm needs to optimize is S/2 (S/4 for each metasurface)
+    ms1_first_quadrant = x[:S//4].reshape(Nx//2, Ny//2)
+    ms2_first_quadrant = x[S//4:].reshape(Nx//2, Ny//2)
+
+    ms1_first_second = np.concatenate((ms1_first_quadrant, np.flip(ms1_first_quadrant, axis=1)), axis=1)
+    ms1 = np.concatenate((ms1_first_second, np.flip(ms1_first_second, axis=0)), axis=0)
+
+    ms2_first_second = np.concatenate((ms2_first_quadrant, np.flip(ms2_first_quadrant, axis=1)), axis=1)
+    ms2 = np.concatenate((ms2_first_second, np.flip(ms2_first_second, axis=0)), axis=0)
+
+    all_ms = np.concatenate((ms1.flatten(), ms2.flatten()))
+
+    w_norm[:] = all_ms
 
     phase_mask[:] = phase_given_w(w_norm)
+
 
     C = _compute_cost() 
 
@@ -522,28 +587,36 @@ def cost_fun(x, grad):
         plt.ylabel('Cost Function Value')
         plt.title('Optimization History')
         plt.tight_layout()
-        plt.savefig("results/optimization_history.pdf")
+        plt.savefig(f"{save_folder}/optimization_history.pdf")
         plt.close()
 
     if grad.size > 0:
-        grad[:] = adjoint_propagate() * 2 * np.pi         
+        full_grad1, full_grad2 = adjoint_propagate()
+        reduced_grad1 = reduce_symmetrized_gradient(full_grad1, Nx//2, Ny//2)
+        reduced_grad2 = reduce_symmetrized_gradient(full_grad2, Nx//2, Ny//2)
+        reduced_grads = np.concatenate((reduced_grad1, reduced_grad2), axis=0)
+        grad[:] = reduced_grads * 2 * np.pi         
     return C
 
 if __name__ == "__main__":
     #initialize nlopt solver
-    solver = nlopt.opt(nlopt.LD_CCSAQ, 2*S)
+    solver = nlopt.opt(nlopt.LD_CCSAQ, S//2)
     
-    solver.set_lower_bounds(mask_lower_bounds.flatten())
-    solver.set_upper_bounds(mask_upper_bounds.flatten())
+    solver.set_lower_bounds(mask_lower_bounds_symm.flatten())
+    solver.set_upper_bounds(mask_upper_bounds_symm.flatten())
     solver.set_max_objective(cost_fun)
     solver.set_maxeval(opt_max_eval)
     solver.set_param("dual_ftol_rel", 1e-7)
     solver.set_param("verbosity",1)
 
     print("Starting optimization...")
+
     start = True
     if start:
-        w_norm[:] = solver.optimize(w_norm)
+        w_norm_symm[:] = solver.optimize(w_norm_symm)
+        w_norm[:S] = expand_symmetrize(w_norm_symm[:S//4], Nx//2, Ny//2)
+        w_norm[S:] = expand_symmetrize(w_norm_symm[S//4:], Nx//2, Ny//2)
+
     print("Optimization completed.")
     print("LAST OPTIMUM VALUE: ", solver.last_optimum_value())
     #verify the results
@@ -561,8 +634,8 @@ if __name__ == "__main__":
     #save the output field for later use
     save_output_field = True
     if save_output_field:
-        np.save("results/intermediate_field_0.npy", intermediate_fields[0].reshape((Nx, Ny)))
-        np.save("results/optimized_output_field.npy", output_field.reshape((Nx, Ny)))
+        np.save(f"{save_folder}/intermediate_field_0.npy", intermediate_fields[0].reshape((Nx, Ny)))
+        np.save(f"{save_folder}/optimized_output_field.npy", output_field.reshape((Nx, Ny)))
     # Plot results in individual PDF figures
     
     # Reshape fields to 2D for visualization
@@ -588,7 +661,7 @@ if __name__ == "__main__":
     #save the phase masks for later use
     savePhase_masks = True
     if savePhase_masks:
-        np.save("results/optimized_phase_mask_1.npy", phase_mask_1)
-        np.save("results/optimized_phase_mask_2.npy", phase_mask_2)
+        np.save(f"{save_folder}/optimized_phase_mask_1.npy", phase_mask_1)
+        np.save(f"{save_folder}/optimized_phase_mask_2.npy", phase_mask_2)
 
-    print("All plots saved to results/ folder.")
+    print(f"All plots saved to {save_folder}/ folder.")

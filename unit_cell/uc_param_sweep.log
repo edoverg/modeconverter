@@ -1,0 +1,31 @@
+nohup: ignoring input
+Rank 2: Running simulation for diameter 0.4478260869565217
+Rank 1: Running simulation for diameter 0.27391304347826084
+Rank 0: Running simulation for diameter 0.1
+Rank 0: Running simulation for diameter 0.12173913043478261
+Rank 1: Running simulation for diameter 0.29565217391304344
+Rank 0: Running simulation for diameter 0.14347826086956522
+Rank 1: Running simulation for diameter 0.3173913043478261
+Rank 2: Running simulation for diameter 0.4695652173913043
+Rank 0: Running simulation for diameter 0.16521739130434782
+Rank 1: Running simulation for diameter 0.33913043478260874
+Rank 0: Running simulation for diameter 0.18695652173913044
+Rank 1: Running simulation for diameter 0.36086956521739133
+Rank 2: Running simulation for diameter 0.4913043478260869
+Rank 0: Running simulation for diameter 0.20869565217391306
+Rank 1: Running simulation for diameter 0.3826086956521739
+Rank 2: Running simulation for diameter 0.5130434782608696
+Rank 0: Running simulation for diameter 0.23043478260869565
+Rank 1: Running simulation for diameter 0.4043478260869565
+Rank 2: Running simulation for diameter 0.5347826086956522
+Rank 0: Running simulation for diameter 0.25217391304347825
+Rank 1: Running simulation for diameter 0.4260869565217391
+Rank 2: Running simulation for diameter 0.5565217391304348
+
+Elapsed run time = 5816.1358 s
+Rank 2: Running simulation for diameter 0.5782608695652174
+Rank 2: Running simulation for diameter 0.6
+
+Elapsed run time = 10194.4932 s
+
+Elapsed run time = 10198.0417 s

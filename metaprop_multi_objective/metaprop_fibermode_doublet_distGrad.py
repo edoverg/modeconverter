@@ -26,9 +26,9 @@ if not os.path.exists("results"):
 ##############################
 #physics and simulation domain
 wavelength = 1.55e-6
-n0 = 1.45
+n0 = 1.0
 n1 = 1.0
-n2 = 1.45
+n2 = 1.0
 
 lda0 = wavelength / n0
 lda1 = wavelength / n1
@@ -57,9 +57,13 @@ rho = np.sqrt(X**2 + Y**2)
 
 sampling_period = xs[1] - xs[0]
 
-d0 = 403e-6 #propagation distance: source - MS1
-d1 = 158e-6 #propagation distance: MS1 - MS2
-d2 = d0 #propagation distance: MS2 - target
+d0_init = 300e-6 #propagation distance: source - MS1
+d1_init = 500e-6 #propagation distance: MS1 - MS2
+d2_init = 400e-6 #propagation distance: MS2 - target
+distance_lower_bound = 100e-6
+distance_upper_bound = 1000e-6
+distance_num = 3
+d = np.array([d0_init, d1_init, d2_init])
 
 phase_min = 0
 phase_max = 2 * np.pi
@@ -91,23 +95,40 @@ KX, KY = np.meshgrid(kappas, kappas)
 K_parallel = np.sqrt(KX**2 + KY**2)
 nu_parallel = K_parallel / (2 * np.pi)
 
-phase_factor_0 = k0 * d0 * np.sqrt(1 - (lda0 * nu_parallel) ** 2 + 0*1j)
-P_0 = np.exp(1j * phase_factor_0)
-P_0_nat = np.fft.ifftshift(P_0)
-phase_factor_1 = k1 * d1 * np.sqrt(1 - (lda1 * nu_parallel) ** 2 + 0*1j)
-P_1 = np.exp(1j * phase_factor_1)
-P_1_nat = np.fft.ifftshift(P_1)
-phase_factor_2 = k2 * d2 * np.sqrt(1 - (lda2 * nu_parallel) ** 2 + 0*1j)
-P_2 = np.exp(1j * phase_factor_2)
-P_2_nat = np.fft.ifftshift(P_2)
-
-P_1_dagger = P_1.T.conj()
-P_2_dagger = P_2.T.conj()
-P_1_dagger_nat = np.fft.ifftshift(P_1).T.conj()
-P_2_dagger_nat = np.fft.ifftshift(P_2).T.conj()
-##############################
+phase_factor_0 = np.zeros((Nx, Ny), dtype=complex)
+P_0 = np.zeros((Nx, Ny), dtype=complex)
+P_0_nat = np.zeros((Nx, Ny), dtype=complex)
+phase_factor_1 = np.zeros((Nx, Ny), dtype=complex)
+P_1 = np.zeros((Nx, Ny), dtype=complex)
+P_1_nat = np.zeros((Nx, Ny), dtype=complex)
+phase_factor_2 = np.zeros((Nx, Ny), dtype=complex)
+P_2 = np.zeros((Nx, Ny), dtype=complex)
+P_2_nat = np.zeros((Nx, Ny), dtype=complex)
+P_1_dagger = np.zeros((Nx, Ny), dtype=complex)
+P_2_dagger = np.zeros((Nx, Ny), dtype=complex)
+P_1_dagger_nat = np.zeros((Nx, Ny), dtype=complex)
+P_2_dagger_nat = np.zeros((Nx, Ny), dtype=complex)
 
 ##############################
+def compute_phase_factors():
+    phase_factor_0[:] = k0 * d[0] * np.sqrt(1 - (wavelength * nu_parallel) ** 2 + 0*1j)
+    P_0[:] = np.exp(1j * phase_factor_0)
+    P_0_nat[:] = np.fft.ifftshift(P_0)
+    phase_factor_1[:] = k0 * d[1] * np.sqrt(1 - (wavelength * nu_parallel) ** 2 + 0*1j)
+    P_1[:] = np.exp(1j * phase_factor_1)
+    P_1_nat[:] = np.fft.ifftshift(P_1)
+    phase_factor_2[:] = k0 * d[2] * np.sqrt(1 - (wavelength * nu_parallel) ** 2 + 0*1j)
+    P_2[:] = np.exp(1j * phase_factor_2)
+    P_2_nat[:] = np.fft.ifftshift(P_2)
+
+    P_1_dagger[:] = P_1.T.conj()
+    P_2_dagger[:] = P_2.T.conj()
+    P_1_dagger_nat[:] = np.fft.ifftshift(P_1).T.conj()
+    P_2_dagger_nat[:] = np.fft.ifftshift(P_2).T.conj()
+
+
+##############################
+#Plot zoom parameters [um]
 #Plot zoom parameters [um]
 zoom_x = 150
 zoom_y = 150
@@ -352,6 +373,7 @@ def make_polarPlot_of(given_field,choose_quantity="amplitude",save_name="polar_p
     ax.axis('off')
     cbar = plt.colorbar(im, ax=ax)
     plt.savefig("results/" + save_name + ".pdf")
+
 ###########################
 #initialize source field
 source_field = get_source_field(beam_waist)
@@ -366,16 +388,17 @@ make_2Dplot_of(source_field_2d, choose_quantity="phase", save_name="source_field
 
 ###########################
 #initialize input field (propagated source field)
-input_field = propagate_source(source_field)
-input_field_2d = input_field.reshape((Nx, Ny)) #reshape to 2D for plotting
-#save the input field to numpy array
-np.save("results/input_field.npy", input_field_2d)
-#input field integrated intensity
-input_field_intensity = np.sum(np.abs(input_field)**2)
-print("Input field integrated intensity: %.4e" % input_field_intensity)
-#make a plot and save the input field
-make_2Dplot_of(input_field_2d, choose_quantity="amplitude", save_name="input_field_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
-make_2Dplot_of(input_field_2d, choose_quantity="phase", save_name="input_field_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+input_field = np.zeros((S,), dtype=complex)
+input_field_2d = np.zeros((Nx, Ny), dtype=complex)
+
+#make_2Dplot_of(input_field_2d, choose_quantity="amplitude", save_name="input_field_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+#make_2Dplot_of(input_field_2d, choose_quantity="phase", save_name="input_field_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+def compute_input_field():
+    input_field[:] = propagate_source(source_field)
+    input_field_2d[:] = input_field.reshape((Nx, Ny)) #reshape to 2D for plotting
+    #input field integrated intensity
+    input_field_intensity = np.sum(np.abs(input_field)**2)
+    print("Input field integrated intensity: %.4e" % input_field_intensity)
 ###########################
 
 ###########################
@@ -409,6 +432,11 @@ mask_buffer = 100e-6
 mask_upper_bounds = norm_phase_max * np.where((np.abs(X.flatten()) > size_x/2 - mask_buffer) | (np.abs(Y.flatten()) > size_y/2 - mask_buffer), 0, 1)
 mask_upper_bounds = np.concatenate((mask_upper_bounds, mask_upper_bounds),axis=0)
 mask_lower_bounds = np.zeros_like(mask_upper_bounds)
+distance_upper_bounds = np.array([1, 1, 1])
+distance_lower_bounds = np.array([0, 0, 0])
+
+distance_and_mask_upper_bounds = np.concatenate((distance_upper_bounds, mask_upper_bounds),axis=0)
+distance_and_mask_lower_bounds = np.concatenate((distance_lower_bounds, mask_lower_bounds),axis=0)
 ###########################
 
 intermediate_fields = [None, None]
@@ -420,7 +448,7 @@ def forward_propagate() -> None:
     print("Starting propagating...")
     start_time = time.time()
 
-    fft_input_array[:,:] = np.fft.ifftshift((input_field * np.exp(1j * phase_mask[:S])).reshape((Nx, Ny)))
+    fft_input_array[:,:] = (input_field * np.exp(1j * phase_mask[:S])).reshape((Nx, Ny))
     fft_operator()
     #print("BEFORE")
     fft_power = np.sum(np.abs(fft_operator.output_array)**2)/S
@@ -438,18 +466,18 @@ def forward_propagate() -> None:
     #print("FFT power: %.4e, Propagating power: %.4e, Non-propagating power: %.4e" % (fft_power, propagating_power, fft_power - propagating_power))
     
     ifft_operator()
-    intermediate_fields[0] = np.fft.fftshift(ifft_operator.output_array.copy())
+    intermediate_fields[0] = ifft_operator.output_array.copy()
     print("Field intensity after first phase mask and propagation: %.4e" % np.sum(np.abs(intermediate_fields[0])**2))
 
-    fft_input_array[:,:] = np.fft.ifftshift(np.fft.fftshift(ifft_operator.output_array) * np.exp(1j * phase_mask[S:].reshape((Nx, Ny))))
+    fft_input_array[:,:] = (ifft_operator.output_array * np.exp(1j * phase_mask[S:].reshape((Nx, Ny))))
     fft_operator()
     ifft_input_array[:,:] = fft_operator.output_array * P_2_nat #element wise product
     ifft_operator()
-    intermediate_fields[1] = np.fft.fftshift(ifft_operator.output_array.copy())
+    intermediate_fields[1] = ifft_operator.output_array.copy()
     
     end_time = time.time()
-    #make_2Dplot_of(intermediate_fields[0], choose_quantity="amplitude", save_name="intermediate_field_1_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
-    #make_2Dplot_of(intermediate_fields[1], choose_quantity="amplitude", save_name="intermediate_field_2_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
+    make_2Dplot_of(intermediate_fields[0], choose_quantity="amplitude", save_name="intermediate_field_1_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
+    make_2Dplot_of(intermediate_fields[1], choose_quantity="amplitude", save_name="intermediate_field_2_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
     
     print("Propagation finished in {:.6f} seconds.".format(end_time - start_time))
 
@@ -466,25 +494,105 @@ def adjoint_propagate():
     Phi_2_dagger = np.exp(-1j * phase_mask[S:]).reshape((Nx, Ny))
 
     #compute the adjoint source
-    fft_input_array[:,:] = np.fft.ifftshift(np.sum(intermediate_fields[1] * np.conj(target_Efield_2d)) * target_Efield_2d)
+    fft_input_array[:,:] = np.sum(intermediate_fields[1] * np.conj(target_Efield_2d)) * target_Efield_2d
     fft_operator()
     ifft_input_array[:,:] = fft_operator.output_array * P_2_dagger_nat
     ifft_operator()
-    fft_input_array[:,:] = np.fft.ifftshift(np.fft.fftshift(ifft_operator.output_array) * Phi_2_dagger)
+    fft_input_array[:,:] = ifft_operator.output_array * Phi_2_dagger
 
-    grad_C_phi_2 = 2 * np.real(-1j * intermediate_fields[0].conj() * np.fft.fftshift(fft_input_array)).flatten() 
+    grad_C_phi_2 = 2 * np.real(-1j * intermediate_fields[0].conj() * fft_input_array).flatten() 
 
     fft_operator()
     ifft_input_array[:,:] = fft_operator.output_array * P_1_dagger_nat #element wise
     ifft_operator()
 
-    grad_C_phi_1 = 2 * np.real(-1j * input_field_2d.conj() * np.fft.fftshift(ifft_operator.output_array) * Phi_1_dagger).flatten()
+    grad_C_phi_1 = 2 * np.real(-1j * input_field_2d.conj() * ifft_operator.output_array * Phi_1_dagger).flatten()
     
     end_time = time.time()
     print("Adjoint finished in {:.6f} seconds.".format(end_time - start_time))
     return np.concatenate((grad_C_phi_1, grad_C_phi_2))
 
+def dist_grad():
+    P_0_tilde = 1j * k0 * np.sqrt(1 - (lda0 * nu_parallel)**2 + 0*1j)
+    print("shape of P_0_tilde: ", P_0_tilde.shape)
+    P_0_triangle = P_0 * P_0_tilde
+    P_0_triangle_nat = np.fft.ifftshift(P_0_triangle)
+
+    P_1_tilde = 1j * k1 * np.sqrt(1 - (lda1 * nu_parallel)**2 + 0*1j)
+    P_1_triangle = P_1 * P_1_tilde
+    P_1_triangle_nat = np.fft.ifftshift(P_1_triangle)
+
+    P_2_tilde = 1j * k2 * np.sqrt(1 - (lda2 * nu_parallel)**2 + 0*1j)
+    P_2_triangle = P_2 * P_2_tilde
+    P_2_triangle_nat = np.fft.ifftshift(P_2_triangle)
+
+    Phi_1 = np.exp(1j * phase_mask[:S]).reshape((Nx, Ny))
+    Phi_2 = np.exp(1j * phase_mask[S:]).reshape((Nx, Ny))
+    Sf = np.sum(intermediate_fields[1] * np.conj(target_Efield_2d))
+    S_dagger = np.conj(Sf)
+    E_t_dagger = np.conj(target_Efield_2d)
+
+    ################################
+    #dC_d0
+    fft_input_array[:,:] = source_field_2d
+    fft_operator()
+    ifft_input_array[:,:] = fft_operator.output_array * P_0_triangle_nat
+    ifft_operator()
+    fft_input_array[:,:] = ifft_operator.output_array * Phi_1
+    fft_operator()
+    ifft_input_array[:,:] = fft_operator.output_array * P_1_nat
+    ifft_operator()
+    fft_input_array[:,:] = ifft_operator.output_array * Phi_2
+    fft_operator()
+    ifft_input_array[:,:] = fft_operator.output_array * P_2_nat
+    ifft_operator()
+
+    dC_d0 = 2 * np.real(S_dagger * np.sum(E_t_dagger * ifft_operator.output_array))
+    ################################
+    #dC_d1
+    fft_input_array[:,:] = source_field_2d
+    fft_operator()
+    ifft_input_array[:,:] = fft_operator.output_array * P_0_nat
+    ifft_operator()
+    fft_input_array[:,:] = ifft_operator.output_array * Phi_1
+    fft_operator()
+    ifft_input_array[:,:] = fft_operator.output_array * P_1_triangle_nat
+    ifft_operator()
+    fft_input_array[:,:] = ifft_operator.output_array * Phi_2
+    fft_operator()
+    ifft_input_array[:,:] = fft_operator.output_array * P_2_nat
+    ifft_operator()
+
+    dC_d1 = 2 * np.real(S_dagger * np.sum(E_t_dagger * ifft_operator.output_array))
+    ################################
+    #dC_d2
+    fft_input_array[:,:] = source_field_2d
+    fft_operator()
+    ifft_input_array[:,:] = fft_operator.output_array * P_0_nat
+    ifft_operator()
+    fft_input_array[:,:] = ifft_operator.output_array * Phi_1
+    fft_operator()
+    ifft_input_array[:,:] = fft_operator.output_array * P_1_nat
+    ifft_operator()
+    fft_input_array[:,:] = ifft_operator.output_array * Phi_2
+    fft_operator()
+    ifft_input_array[:,:] = fft_operator.output_array * P_2_triangle_nat
+    ifft_operator()
+
+    dC_d2 = 2 * np.real(S_dagger * np.sum(E_t_dagger * ifft_operator.output_array))
+
+    return np.array([dC_d0, dC_d1, dC_d2])
+
+def dist_norm_to_real(norm_dist):
+    '''Maps normalized distance parameters to real distance values.
+    Args:
+        norm_dist: normalized distance parameters (flattened)
+    Returns:
+        Real distance values corresponding to the normalized parameters (flattened)'''
+    return norm_dist * (distance_upper_bound - distance_lower_bound) + distance_lower_bound
+
 def _compute_cost():
+
     forward_propagate()
 
     output_field = intermediate_fields[-1].flatten()
@@ -498,7 +606,7 @@ def _compute_cost():
     return C_t   
 
 opt_history = []
-iter_num = [0]
+opt_cycle = [0]
 def cost_fun(x, grad):
     ''' Cost function to be minimized.
     Args:
@@ -507,34 +615,43 @@ def cost_fun(x, grad):
     Returns:
         The cost function value for the input parameter field x.
     '''
-    w_norm[:] = x
-
+    d[:] = dist_norm_to_real(x[:distance_num]) #update distance variables
+    print("Current distances: ", d)
+    w_norm[:] = x[distance_num:] #update normalized phase mask parameters
     phase_mask[:] = phase_given_w(w_norm)
+
+    compute_phase_factors() #update phase factor matrices
+    compute_input_field() #update input field based on the new distances
 
     C = _compute_cost() 
 
     opt_history.append(C)
-    iter_num[0] += 1
-    if iter_num[0] % 10 == 0:
-        plt.figure()
-        plt.plot(opt_history)
-        plt.xlabel('Iteration')
-        plt.ylabel('Cost Function Value')
-        plt.title('Optimization History')
-        plt.tight_layout()
-        plt.savefig("results/optimization_history.pdf")
-        plt.close()
 
+    plt.figure()
+    plt.plot(opt_history)
+    plt.xlabel('Iteration')
+    plt.ylabel('Cost Function Value')
+    plt.title('Optimization History')
+    plt.tight_layout()
+    plt.savefig("results/modeconv1_optimization_history.pdf")
+    plt.close()
+
+    opt_cycle[0] = opt_cycle[0] + 1
     if grad.size > 0:
-        grad[:] = adjoint_propagate() * 2 * np.pi         
+        if opt_cycle[0] < 1000:
+            grad[:distance_num] = np.zeros(distance_num) #set distance gradient to zero for the first 100 iterations
+        else:
+            grad[:distance_num] = dist_grad() * (distance_upper_bound - distance_lower_bound)
+            #grad[:distance_num] = np.array([0,0,0]) #set distance gradient to zero for now
+        grad[distance_num:] = adjoint_propagate() * 2 * np.pi
     return C
 
 if __name__ == "__main__":
     #initialize nlopt solver
-    solver = nlopt.opt(nlopt.LD_CCSAQ, 2*S)
+    solver = nlopt.opt(nlopt.LD_CCSAQ, distance_num + 2*S)
     
-    solver.set_lower_bounds(mask_lower_bounds.flatten())
-    solver.set_upper_bounds(mask_upper_bounds.flatten())
+    solver.set_lower_bounds(distance_and_mask_lower_bounds.flatten())
+    solver.set_upper_bounds(distance_and_mask_upper_bounds.flatten())
     solver.set_max_objective(cost_fun)
     solver.set_maxeval(opt_max_eval)
     solver.set_param("dual_ftol_rel", 1e-7)
@@ -542,14 +659,21 @@ if __name__ == "__main__":
 
     print("Starting optimization...")
     start = True
+    initial_d = np.array([0.4, 0.5, 0.3])
+    dist_and_w_norm = np.concatenate((initial_d, w_norm), axis=0) #initialize optimization variables
+
     if start:
-        w_norm[:] = solver.optimize(w_norm)
+        dist_and_w_norm[:] = solver.optimize(dist_and_w_norm)
+
     print("Optimization completed.")
-    print("LAST OPTIMUM VALUE: ", solver.last_optimum_value())
+    d[:] = dist_norm_to_real(dist_and_w_norm[:distance_num]) #update distance variables
+    w_norm[:] = dist_and_w_norm[distance_num:] #update normalized phase mask parameters
+    print("Optimized distances: ", d)
     #verify the results
-    phase_mask = phase_given_w(w_norm)
+    compute_phase_factors()
+    compute_input_field()
+    phase_mask[:] = phase_given_w(w_norm)
     forward_propagate()
-    field_input_ms2 = intermediate_fields[0]
     output_field = intermediate_fields[-1]
     
     input_power = np.sum(np.abs(input_field)**2)
@@ -559,10 +683,9 @@ if __name__ == "__main__":
     print("Norm. output power: %.4e" % output_power)
 
     #save the output field for later use
-    save_output_field = True
+    save_output_field = False
     if save_output_field:
-        np.save("results/intermediate_field_0.npy", intermediate_fields[0].reshape((Nx, Ny)))
-        np.save("results/optimized_output_field.npy", output_field.reshape((Nx, Ny)))
+        np.savetxt("results/optimized_output_field.txt", output_field.reshape((Nx, Ny)))
     # Plot results in individual PDF figures
     
     # Reshape fields to 2D for visualization
@@ -588,7 +711,7 @@ if __name__ == "__main__":
     #save the phase masks for later use
     savePhase_masks = True
     if savePhase_masks:
-        np.save("results/optimized_phase_mask_1.npy", phase_mask_1)
-        np.save("results/optimized_phase_mask_2.npy", phase_mask_2)
+        np.savetxt("results/optimized_phase_mask_1.txt", phase_mask_1)
+        np.savetxt("results/optimized_phase_mask_2.txt", phase_mask_2)
 
     print("All plots saved to results/ folder.")
