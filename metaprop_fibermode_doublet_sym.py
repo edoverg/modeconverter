@@ -24,8 +24,6 @@ save_folder = "results_sym"
 if not os.path.exists(save_folder):
     os.makedirs(save_folder)
 
-
-
 ##############################
 #physics and simulation domain
 wavelength = 1.55e-6
@@ -45,23 +43,38 @@ opt_max_eval = 150
 
 unit_cell_pitch = 700e-9 #equivalent to spatial sampling
 
-Nx = 1024 #pixels per dimension
+Nx = 1025 #pixels per dimension
 Ny = Nx
+nx = (Nx - 1) // 2 #indices without axes (= #512)
+ny = (Ny - 1) // 2
+dof = 2*((nx + 1)**2) #number of degrees of freedom per metasurface
 S = Nx * Ny
 
 size_x = unit_cell_pitch * Nx #actual physical size
 size_y = unit_cell_pitch * Ny
 
-xs = np.linspace(-size_x/2, size_x/2 - size_x / Nx, Nx)
-ys = np.linspace(-size_y/2, size_y/2 - size_y / Ny, Ny)
+xs = np.arange(-Nx//2+1, Nx//2+1) * (size_x / Nx)
+ys = np.arange(-Ny//2+1, Ny//2+1) * (size_y / Ny)
+
+#important checks on spatial grid
+try:
+    assert(len(xs) == Nx)
+    assert(len(ys) == Ny)
+    assert(xs[0] == xs[-1]*-1)
+    assert(ys[0] == ys[-1]*-1)
+    assert(xs[nx]==0)
+    assert(ys[ny]==0)
+    assert(np.abs(np.abs(xs[1]-xs[0]) - unit_cell_pitch) < 1e-12)
+except:
+    raise ValueError("Error while setting up the spatial grid.")
 
 X, Y = np.meshgrid(xs, ys)
 rho = np.sqrt(X**2 + Y**2)
 
 sampling_period = xs[1] - xs[0]
 
-d0 = 403e-6 #propagation distance: source - MS1
-d1 = 158e-6 #propagation distance: MS1 - MS2
+d0 = 535e-6 #propagation distance: source - MS1
+d1 = 415e-6 #propagation distance: MS1 - MS2
 d2 = d0 #propagation distance: MS2 - target
 
 phase_min = 0
@@ -356,28 +369,37 @@ def make_polarPlot_of(given_field,choose_quantity="amplitude",save_name="polar_p
     cbar = plt.colorbar(im, ax=ax)
     plt.savefig(f"{save_folder}/" + save_name + ".pdf")
 
-def symmetrize(w, nx, ny):
+def symmetrize(w):
     '''
-    Takes an input array, turns it into a 2D array, and symmetrizes it along the x and y axes.
-    Returns the first quadrant of shape (nx,ny), flattened
+    Takes an input array, which must be full in size, turns it into a 2D array, and symmetrizes it along the x and y axes.
+    Returns the first quadrant of shape (nx,ny), including the zero axis, flattened
     '''
     try:
         w_2d = w.reshape((Nx, Ny))
-    except ValueError:
+    except:
         raise ValueError(f"Input array w cannot be reshaped to ({Nx}, {Ny}). Current shape: {w.shape}")
-    w_symm = np.zeros((nx, ny))
-    w_symm[:,:] = w_2d[:nx, :ny]
+
+    w_symm = np.zeros((nx+1, ny+1))
+    w_symm[:,:] = w_2d[:nx+1, :ny+1]
+
     return w_symm.flatten()
 
-def expand_symmetrize(w_symm, nx, ny):
+def expand_symmetrize(w_symm):
     '''
-    Takes a symmetrized array of shape (nx, ny) and expands it to a full 2D array of shape (Nx, Ny) by mirroring, flattened.
+    Takes a array of shape (nx+1, ny+1), representing the first quadrant, including zero axes, and 
+    expands it to a full 2D array of shape (Nx, Ny) by mirroring, flattened.
     '''
+
+    w_symm_2d = w_symm.reshape((nx+1, ny+1))
+
     w_full = np.zeros((Nx, Ny))
-    w_full[:nx, :ny] = w_symm.reshape((nx, ny))
-    w_full[:nx, ny:] = np.flip(w_symm.reshape((nx, ny)), axis=1)
-    w_full[nx:, :ny] = np.flip(w_symm.reshape((nx, ny)), axis=0)
-    w_full[nx:, ny:] = np.flip(np.flip(w_symm.reshape((nx, ny)), axis=0), axis=1)
+
+    w_full[:nx+1, :ny+1] = w_symm_2d
+    w_full[:nx+1, ny+1:] = np.flip(w_full[:nx+1, :ny], axis=1)
+    w_full[nx+1:, :ny+1] = np.flip(w_full[:nx, :ny+1], axis=0)
+    w_full[nx+1:, ny+1:] = np.flip(np.flip(w_full[:nx, :ny], axis=1), axis=0)
+    w_full[nx, ny] = w_symm_2d[-1, -1]
+
     return w_full.flatten()
 
 ###########################
@@ -421,15 +443,15 @@ make_polarPlot_of(target_Efield_2d, choose_quantity="phase", save_name="target_f
 ###########################
 #initialize the normalized phase masks and global phase mask
 w_norm = np.zeros((2*S)) #concatenated normalized parameters for both masks
-X, Y = np.meshgrid(np.linspace(-size_x/2, size_x/2, Nx), np.linspace(-size_y/2, size_y/2, Ny))
+
 rho = np.sqrt(X**2 + Y**2)
 circular_mask_1 = np.where(rho.flatten() < output_fiber_core_diameter/3, 1, 0)
 #w_norm[:S] += circular_mask_1
 target_pattern_phase = (np.angle(target_Efield) + 2 * np.pi) % (2 * np.pi)*circular_mask_1 #make sure the phase is between 0 and 2pi
 w_norm[S:] += target_pattern_phase / (2 * np.pi) #normalize the target phase to be between 0 and 1
 
-w_norm_symm_1 = symmetrize(w_norm[:S], Nx//2, Ny//2)
-w_norm_symm_2 = symmetrize(w_norm[S:], Nx//2, Ny//2)
+w_norm_symm_1 = symmetrize(w_norm[:S])
+w_norm_symm_2 = symmetrize(w_norm[S:])
 
 w_norm_symm = np.concatenate((w_norm_symm_1, w_norm_symm_2), axis=0)
 
@@ -441,7 +463,7 @@ norm_phase_min = 0
 norm_phase_max = 1
 mask_buffer = 100e-6
 mask_upper_bounds = norm_phase_max * np.where((np.abs(X.flatten()) > size_x/2 - mask_buffer) | (np.abs(Y.flatten()) > size_y/2 - mask_buffer), 0, 1)
-mask_upper_bounds_symm = mask_upper_bounds.reshape((Nx,Ny))[:Nx//2, :Ny//2].flatten()
+mask_upper_bounds_symm = mask_upper_bounds.reshape((Nx,Ny))[:nx+1, :ny+1].flatten()
 
 mask_upper_bounds_symm = np.concatenate((mask_upper_bounds_symm, mask_upper_bounds_symm),axis=0)
 mask_lower_bounds_symm = np.zeros_like(mask_upper_bounds_symm)
@@ -485,23 +507,25 @@ def forward_propagate() -> None:
     intermediate_fields[1] = np.fft.fftshift(ifft_operator.output_array.copy())
     
     end_time = time.time()
-    make_2Dplot_of(intermediate_fields[0], choose_quantity="amplitude", save_name="intermediate_field_1_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
-    make_2Dplot_of(intermediate_fields[1], choose_quantity="amplitude", save_name="intermediate_field_2_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
+    #make_2Dplot_of(intermediate_fields[0], choose_quantity="amplitude", save_name="intermediate_field_1_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
+    #make_2Dplot_of(intermediate_fields[1], choose_quantity="amplitude", save_name="intermediate_field_2_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
     
     print("Propagation finished in {:.6f} seconds.".format(end_time - start_time))
 
 
-def reduce_symmetrized_gradient(g_full, nx, ny):
+def reduce_symmetrized_gradient(g_full):
     g_2d = g_full.reshape((Nx, Ny))
 
-    g_reduced = (
-        g_2d[:nx, :ny]
-        + np.flip(g_2d[:nx, ny:], axis=1)
-        + np.flip(g_2d[nx:, :ny], axis=0)
-        + np.flip(np.flip(g_2d[nx:, ny:], axis=0), axis=1)
-    )
+    g_reduced = g_2d[:nx+1, :ny+1]
+    third = g_2d[nx+1:,:ny+1]
+    second = g_2d[:nx+1, ny+1:]
+    fourth = g_2d[nx+1:, ny+1:]
 
-    return g_reduced.flatten()
+    g_2d[:nx, ny+1:] += np.flip(fourth, axis = 0)
+    g_2d[:nx, :ny+1] += np.flip(third, axis = 0)
+    g_2d[:nx+1, :ny] += np.flip(second, axis = 1)
+    
+    return g_2d[:nx+1, :ny+1].flatten()
 
 def adjoint_propagate():
     '''Backpropagates the output field using the adjoint of the propagation matrix P.
@@ -560,16 +584,13 @@ def cost_fun(x, grad):
     #since the objective function is to maximize the overlap, and the target mode is C4 symmetric, 
     #we can let the algorithm optimize only a fourth of the phase mask and then synthetize automatically the remaining three quadrants.
     #Since we have two metasurfaces, the total number of parameters the algorithm needs to optimize is S/2 (S/4 for each metasurface)
-    ms1_first_quadrant = x[:S//4].reshape(Nx//2, Ny//2)
-    ms2_first_quadrant = x[S//4:].reshape(Nx//2, Ny//2)
+    ms1_first_quadrant = x[:dof//2].reshape(nx+1, ny+1)
+    ms2_first_quadrant = x[dof//2:].reshape(nx+1, ny+1)
 
-    ms1_first_second = np.concatenate((ms1_first_quadrant, np.flip(ms1_first_quadrant, axis=1)), axis=1)
-    ms1 = np.concatenate((ms1_first_second, np.flip(ms1_first_second, axis=0)), axis=0)
+    ms1 = expand_symmetrize(ms1_first_quadrant)
+    ms2 = expand_symmetrize(ms2_first_quadrant)
 
-    ms2_first_second = np.concatenate((ms2_first_quadrant, np.flip(ms2_first_quadrant, axis=1)), axis=1)
-    ms2 = np.concatenate((ms2_first_second, np.flip(ms2_first_second, axis=0)), axis=0)
-
-    all_ms = np.concatenate((ms1.flatten(), ms2.flatten()))
+    all_ms = np.concatenate((ms1, ms2))
 
     w_norm[:] = all_ms
 
@@ -592,15 +613,15 @@ def cost_fun(x, grad):
 
     if grad.size > 0:
         full_grad1, full_grad2 = adjoint_propagate()
-        reduced_grad1 = reduce_symmetrized_gradient(full_grad1, Nx//2, Ny//2)
-        reduced_grad2 = reduce_symmetrized_gradient(full_grad2, Nx//2, Ny//2)
+        reduced_grad1 = reduce_symmetrized_gradient(full_grad1)
+        reduced_grad2 = reduce_symmetrized_gradient(full_grad2)
         reduced_grads = np.concatenate((reduced_grad1, reduced_grad2), axis=0)
         grad[:] = reduced_grads * 2 * np.pi         
     return C
 
 if __name__ == "__main__":
     #initialize nlopt solver
-    solver = nlopt.opt(nlopt.LD_CCSAQ, S//2)
+    solver = nlopt.opt(nlopt.LD_CCSAQ, dof)
     
     solver.set_lower_bounds(mask_lower_bounds_symm.flatten())
     solver.set_upper_bounds(mask_upper_bounds_symm.flatten())
@@ -614,8 +635,8 @@ if __name__ == "__main__":
     start = True
     if start:
         w_norm_symm[:] = solver.optimize(w_norm_symm)
-        w_norm[:S] = expand_symmetrize(w_norm_symm[:S//4], Nx//2, Ny//2)
-        w_norm[S:] = expand_symmetrize(w_norm_symm[S//4:], Nx//2, Ny//2)
+        w_norm[:S] = expand_symmetrize(w_norm_symm[:dof//2])
+        w_norm[S:] = expand_symmetrize(w_norm_symm[dof//2:])
 
     print("Optimization completed.")
     print("LAST OPTIMUM VALUE: ", solver.last_optimum_value())
