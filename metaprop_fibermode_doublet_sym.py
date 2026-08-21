@@ -73,9 +73,10 @@ rho = np.sqrt(X**2 + Y**2)
 
 sampling_period = xs[1] - xs[0]
 
-d0 = 535e-6 #propagation distance: source - MS1
-d1 = 415e-6 #propagation distance: MS1 - MS2
-d2 = d0 #propagation distance: MS2 - target
+d0 = 535e-6 #propagation distance: source - MS1 [m]
+d_source = d0 - lda0 / 2  #propagation distance: source - MS1 used for FDTD simulations [m]
+d1 = 415e-6 #propagation distance: MS1 - MS2 [m]
+d2 = d0 #propagation distance: MS2 - target [m]
 
 phase_min = 0
 phase_max = 2 * np.pi
@@ -110,6 +111,11 @@ nu_parallel = K_parallel / (2 * np.pi)
 phase_factor_0 = k0 * d0 * np.sqrt(1 - (lda0 * nu_parallel) ** 2 + 0*1j)
 P_0 = np.exp(1j * phase_factor_0)
 P_0_nat = np.fft.ifftshift(P_0)
+
+phase_factor_0_source = k0 * d_source * np.sqrt(1 - (lda0 * nu_parallel) ** 2 + 0*1j)
+P_0_source = np.exp(1j * phase_factor_0_source)
+P_0_nat_source = np.fft.ifftshift(P_0_source)
+
 phase_factor_1 = k1 * d1 * np.sqrt(1 - (lda1 * nu_parallel) ** 2 + 0*1j)
 P_1 = np.exp(1j * phase_factor_1)
 P_1_nat = np.fft.ifftshift(P_1)
@@ -285,6 +291,23 @@ def propagate_source(source_to_propagate):
     
     return propagated_source_field
 
+def propagate_source_before_MS1(source_to_propagate):
+    '''Returns the propagated source field (flattened) just before metasurface 1 (MS1). 
+    This involves propagating the source for a distance d0: from its plane of definition up to MS1.
+    Args:
+        source_to_propagate: the source field to be propagated (flattened)
+    Returns:
+        The propagated source field (flattened) just before MS1.
+    '''
+    
+    fft_input_array[:,:] = np.fft.ifftshift(source_to_propagate.reshape((Nx, Ny)))
+    fft_operator()
+    ifft_input_array[:,:] = fft_operator.output_array * P_0_nat_source
+    ifft_operator()
+    propagated_source_field = np.fft.fftshift(ifft_operator.output_array).flatten()
+    
+    return propagated_source_field
+
 def make_1Dplot_of(x_axis,y_axis,plot_zoom_x=zoom_x,save_name="plot_1D",) -> None:
     '''Makes a 1D plot of the given data and saves it to a PDF file.
     Args:
@@ -417,6 +440,10 @@ make_2Dplot_of(source_field_2d, choose_quantity="phase", save_name="source_field
 ###########################
 #initialize input field (propagated source field)
 input_field = propagate_source(source_field)
+#propagate the source field to the plane just before MS1 and save it to a numpy array, to be used in FDTD simulations
+input_field_before_MS1 = propagate_source_before_MS1(source_field)
+np.save(f"{save_folder}/input_field_before_MS1.npy", input_field_before_MS1.reshape((Nx, Ny)))
+
 input_field_2d = input_field.reshape((Nx, Ny)) #reshape to 2D for plotting
 #save the input field to numpy array
 np.save(f"{save_folder}/input_field.npy", input_field_2d)
@@ -426,6 +453,8 @@ print("Input field integrated intensity: %.4e" % input_field_intensity)
 #make a plot and save the input field
 make_2Dplot_of(input_field_2d, choose_quantity="amplitude", save_name="input_field_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
 make_2Dplot_of(input_field_2d, choose_quantity="phase", save_name="input_field_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+make_2Dplot_of(input_field_before_MS1.reshape((Nx, Ny)), choose_quantity="amplitude", save_name="input_field_before_MS1_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
+make_2Dplot_of(input_field_before_MS1.reshape((Nx, Ny)), choose_quantity="phase", save_name="input_field_before_MS1_phase", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
 ###########################
 
 ###########################
