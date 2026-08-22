@@ -18,11 +18,17 @@ plt.rcParams.update({'font.size': 14})
 
 from scipy.special import jv, kv
 
-import os
+from smt.applications.ego import EGO, KRG
+from smt.sampling_methods import LHS
+from smt.design_space import (
+    DesignSpace,
+) 
 
-save_folder = "results_sym"
-if not os.path.exists(save_folder):
-    os.makedirs(save_folder)
+
+import os
+results_folder = "results_symm_ego"
+if not os.path.exists(results_folder):
+    os.makedirs(results_folder)
 
 ##############################
 #physics and simulation domain
@@ -39,7 +45,7 @@ k0 = 2 * np.pi / lda0
 k1 = 2 * np.pi / lda1
 k2 = 2 * np.pi / lda2
 
-opt_max_eval = 200
+opt_max_eval = 150
 
 unit_cell_pitch = 700e-9 #equivalent to spatial sampling
 
@@ -53,30 +59,18 @@ S = Nx * Ny
 size_x = unit_cell_pitch * Nx #actual physical size
 size_y = unit_cell_pitch * Ny
 
-xs = np.arange(-Nx//2+1, Nx//2+1) * (size_x / Nx)
-ys = np.arange(-Ny//2+1, Ny//2+1) * (size_y / Ny)
-
-#important checks on spatial grid
-try:
-    assert(len(xs) == Nx)
-    assert(len(ys) == Ny)
-    assert(xs[0] == xs[-1]*-1)
-    assert(ys[0] == ys[-1]*-1)
-    assert(xs[nx]==0)
-    assert(ys[ny]==0)
-    assert(np.abs(np.abs(xs[1]-xs[0]) - unit_cell_pitch) < 1e-12)
-except:
-    raise ValueError("Error while setting up the spatial grid.")
+xs = np.linspace(-size_x/2, size_x/2 - size_x / Nx, Nx)
+ys = np.linspace(-size_y/2, size_y/2 - size_y / Ny, Ny)
 
 X, Y = np.meshgrid(xs, ys)
 rho = np.sqrt(X**2 + Y**2)
 
 sampling_period = xs[1] - xs[0]
 
-d0 = 535e-6 #propagation distance: source - MS1 [m]
-d_source = d0 - lda0 / 2  #propagation distance: source - MS1 used for FDTD simulations [m]
-d1 = 415e-6 #propagation distance: MS1 - MS2 [m]
-d2 = d0 #propagation distance: MS2 - target [m]
+d0 = 0 #propagation distance: source - MS1
+d1 = 0 #propagation distance: MS1 - MS2
+d2 = d0 #propagation distance: MS2 - target
+d = np.zeros((3,))
 
 phase_min = 0
 phase_max = 2 * np.pi
@@ -84,12 +78,12 @@ phase_max = 2 * np.pi
 
 ##############################
 #Source
-beam_waist = 5.2e-6 #[um]
+beam_waist = 5.2e-6
 #output fibre
-output_fiber_core_diameter = 19e-6 #[um]
+output_fiber_core_diameter = 19e-6
 #fibre cladding diameter
 fibre_cladding_diameter = 125e-6 #[um]
-max_available_diameter = 122e-6
+max_available_diameter = 122e-6 #this is the metasurface maximum diameter (must be smaller than cladding)
 ##############################
 
 ##############################
@@ -111,18 +105,13 @@ KX, KY = np.meshgrid(kappas, kappas)
 K_parallel = np.sqrt(KX**2 + KY**2)
 nu_parallel = K_parallel / (2 * np.pi)
 
-phase_factor_0 = k0 * d0 * np.sqrt(1 - (lda0 * nu_parallel) ** 2 + 0*1j)
+phase_factor_0 = k0 * d[0] * np.sqrt(1 - (lda0 * nu_parallel) ** 2 + 0*1j)
 P_0 = np.exp(1j * phase_factor_0)
 P_0_nat = np.fft.ifftshift(P_0)
-
-phase_factor_0_source = k0 * d_source * np.sqrt(1 - (lda0 * nu_parallel) ** 2 + 0*1j)
-P_0_source = np.exp(1j * phase_factor_0_source)
-P_0_nat_source = np.fft.ifftshift(P_0_source)
-
-phase_factor_1 = k1 * d1 * np.sqrt(1 - (lda1 * nu_parallel) ** 2 + 0*1j)
+phase_factor_1 = k1 * d[1] * np.sqrt(1 - (lda1 * nu_parallel) ** 2 + 0*1j)
 P_1 = np.exp(1j * phase_factor_1)
 P_1_nat = np.fft.ifftshift(P_1)
-phase_factor_2 = k2 * d2 * np.sqrt(1 - (lda2 * nu_parallel) ** 2 + 0*1j)
+phase_factor_2 = k2 * d[2] * np.sqrt(1 - (lda2 * nu_parallel) ** 2 + 0*1j)
 P_2 = np.exp(1j * phase_factor_2)
 P_2_nat = np.fft.ifftshift(P_2)
 
@@ -294,23 +283,6 @@ def propagate_source(source_to_propagate):
     
     return propagated_source_field
 
-def propagate_source_before_MS1(source_to_propagate):
-    '''Returns the propagated source field (flattened) just before metasurface 1 (MS1). 
-    This involves propagating the source for a distance d0: from its plane of definition up to MS1.
-    Args:
-        source_to_propagate: the source field to be propagated (flattened)
-    Returns:
-        The propagated source field (flattened) just before MS1.
-    '''
-    
-    fft_input_array[:,:] = np.fft.ifftshift(source_to_propagate.reshape((Nx, Ny)))
-    fft_operator()
-    ifft_input_array[:,:] = fft_operator.output_array * P_0_nat_source
-    ifft_operator()
-    propagated_source_field = np.fft.fftshift(ifft_operator.output_array).flatten()
-    
-    return propagated_source_field
-
 def make_1Dplot_of(x_axis,y_axis,plot_zoom_x=zoom_x,save_name="plot_1D",) -> None:
     '''Makes a 1D plot of the given data and saves it to a PDF file.
     Args:
@@ -329,7 +301,7 @@ def make_1Dplot_of(x_axis,y_axis,plot_zoom_x=zoom_x,save_name="plot_1D",) -> Non
     plt.xlabel("x [um]")
     plt.tight_layout()
     plt.xlim(-plot_zoom_x, plot_zoom_x)
-    plt.savefig(f"{save_folder}/" + save_name + ".pdf")
+    plt.savefig(results_folder + "/" + save_name + ".pdf")
     plt.close()
 
 def make_2Dplot_of(given_field,choose_quantity="amplitude",save_name="plot",plot_zoom_x=zoom_x,plot_zoom_y=zoom_y) -> None:
@@ -361,7 +333,7 @@ def make_2Dplot_of(given_field,choose_quantity="amplitude",save_name="plot",plot
     plt.ylabel("y [um]")
     plt.colorbar()
     plt.tight_layout()
-    plt.savefig(f"{save_folder}/" + save_name + ".pdf")
+    plt.savefig(results_folder + "/" + save_name + ".pdf")
     plt.close()
 
 def make_polarPlot_of(given_field,choose_quantity="amplitude",save_name="polar_plot",plot_zoom_r=zoom_x) -> None:
@@ -393,7 +365,7 @@ def make_polarPlot_of(given_field,choose_quantity="amplitude",save_name="polar_p
     ax.set_ylim(center_y - radius, center_y + radius)
     ax.axis('off')
     cbar = plt.colorbar(im, ax=ax)
-    plt.savefig(f"{save_folder}/" + save_name + ".pdf")
+    plt.savefig(results_folder + "/" + save_name + ".pdf")
 
 def symmetrize(w):
     '''
@@ -443,21 +415,15 @@ make_2Dplot_of(source_field_2d, choose_quantity="phase", save_name="source_field
 ###########################
 #initialize input field (propagated source field)
 input_field = propagate_source(source_field)
-#propagate the source field to the plane just before MS1 and save it to a numpy array, to be used in FDTD simulations
-input_field_before_MS1 = propagate_source_before_MS1(source_field)
-np.save(f"{save_folder}/input_field_before_MS1.npy", input_field_before_MS1.reshape((Nx, Ny)))
-
 input_field_2d = input_field.reshape((Nx, Ny)) #reshape to 2D for plotting
 #save the input field to numpy array
-np.save(f"{save_folder}/input_field.npy", input_field_2d)
+np.save(results_folder + "/input_field.npy", input_field_2d)
 #input field integrated intensity
 input_field_intensity = np.sum(np.abs(input_field)**2)
 print("Input field integrated intensity: %.4e" % input_field_intensity)
 #make a plot and save the input field
 make_2Dplot_of(input_field_2d, choose_quantity="amplitude", save_name="input_field_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
 make_2Dplot_of(input_field_2d, choose_quantity="phase", save_name="input_field_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
-make_2Dplot_of(input_field_before_MS1.reshape((Nx, Ny)), choose_quantity="amplitude", save_name="input_field_before_MS1_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
-make_2Dplot_of(input_field_before_MS1.reshape((Nx, Ny)), choose_quantity="phase", save_name="input_field_before_MS1_phase", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
 ###########################
 
 ###########################
@@ -475,7 +441,7 @@ make_polarPlot_of(target_Efield_2d, choose_quantity="phase", save_name="target_f
 ###########################
 #initialize the normalized phase masks and global phase mask
 w_norm = np.zeros((2*S)) #concatenated normalized parameters for both masks
-
+X, Y = np.meshgrid(np.linspace(-size_x/2, size_x/2, Nx), np.linspace(-size_y/2, size_y/2, Ny))
 rho = np.sqrt(X**2 + Y**2)
 circular_mask_1 = np.where(rho.flatten() < output_fiber_core_diameter/3, 1, 0)
 #w_norm[:S] += circular_mask_1
@@ -488,7 +454,6 @@ w_norm_symm_2 = symmetrize(w_norm[S:])
 w_norm_symm = np.concatenate((w_norm_symm_1, w_norm_symm_2), axis=0)
 
 phase_mask = phase_given_w(w_norm)
-
 #define bounding box for the optimization. The outer mask is fixed to zero phase, while the inner mask can vary between 0 and 2pi phase.
 #the bounding box is the outer shell of a square with thickness 100 um
 norm_phase_min = 0
@@ -544,7 +509,6 @@ def forward_propagate() -> None:
     
     print("Propagation finished in {:.6f} seconds.".format(end_time - start_time))
 
-
 def reduce_symmetrized_gradient(g_full):
     g_2d = g_full.reshape((Nx, Ny))
 
@@ -590,7 +554,6 @@ def adjoint_propagate():
     return grad_C_phi_1, grad_C_phi_2
 
 def _compute_cost():
-
     forward_propagate()
 
     output_field = intermediate_fields[-1].flatten()
@@ -603,8 +566,8 @@ def _compute_cost():
 
     return C_t   
 
-opt_history = []
 iter_num = [0]
+opt_history = []
 def cost_fun(x, grad):
     ''' Cost function to be minimized.
     Args:
@@ -613,9 +576,6 @@ def cost_fun(x, grad):
     Returns:
         The cost function value for the input parameter field x.
     '''
-    #since the objective function is to maximize the overlap, and the target mode is mirror symmetric, 
-    #we can let the algorithm optimize only a fourth of the phase mask and then synthetize automatically the remaining three quadrants.
-    #Since we have two metasurfaces, the total number of parameters the algorithm needs to optimize is S/2 (S/4 for each metasurface)
     ms1_first_quadrant = x[:dof//2].reshape(nx+1, ny+1)
     ms2_first_quadrant = x[dof//2:].reshape(nx+1, ny+1)
 
@@ -628,7 +588,6 @@ def cost_fun(x, grad):
 
     phase_mask[:] = phase_given_w(w_norm)
 
-
     C = _compute_cost() 
 
     opt_history.append(C)
@@ -640,7 +599,7 @@ def cost_fun(x, grad):
         plt.ylabel('Cost Function Value')
         plt.title('Optimization History')
         plt.tight_layout()
-        plt.savefig(f"{save_folder}/optimization_history.pdf")
+        plt.savefig(results_folder + "/modeconv1_optimization_history.pdf")
         plt.close()
 
     if grad.size > 0:
@@ -648,10 +607,10 @@ def cost_fun(x, grad):
         reduced_grad1 = reduce_symmetrized_gradient(full_grad1)
         reduced_grad2 = reduce_symmetrized_gradient(full_grad2)
         reduced_grads = np.concatenate((reduced_grad1, reduced_grad2), axis=0)
-        grad[:] = reduced_grads * 2 * np.pi         
+        grad[:] = reduced_grads * 2 * np.pi          
     return C
 
-if __name__ == "__main__":
+def metaprop():
     #initialize nlopt solver
     solver = nlopt.opt(nlopt.LD_CCSAQ, dof)
     
@@ -663,7 +622,6 @@ if __name__ == "__main__":
     solver.set_param("verbosity",1)
 
     print("Starting optimization...")
-
     start = True
     if start:
         w_norm_symm[:] = solver.optimize(w_norm_symm)
@@ -671,9 +629,9 @@ if __name__ == "__main__":
         w_norm[S:] = expand_symmetrize(w_norm_symm[dof//2:])
 
     print("Optimization completed.")
-    print("LAST OPTIMUM VALUE: ", solver.last_optimum_value())
+
     #verify the results
-    phase_mask = phase_given_w(w_norm)
+    phase_mask[:] = phase_given_w(w_norm)
     forward_propagate()
     field_input_ms2 = intermediate_fields[0]
     output_field = intermediate_fields[-1]
@@ -687,8 +645,8 @@ if __name__ == "__main__":
     #save the output field for later use
     save_output_field = True
     if save_output_field:
-        np.save(f"{save_folder}/intermediate_field_0.npy", intermediate_fields[0].reshape((Nx, Ny)))
-        np.save(f"{save_folder}/optimized_output_field.npy", output_field.reshape((Nx, Ny)))
+        np.save(results_folder + "/intermediate_field_0.npy", intermediate_fields[0].reshape((Nx, Ny)))
+        np.save(results_folder + "/optimized_output_field.npy", output_field.reshape((Nx, Ny)))
     # Plot results in individual PDF figures
     
     # Reshape fields to 2D for visualization
@@ -714,7 +672,123 @@ if __name__ == "__main__":
     #save the phase masks for later use
     savePhase_masks = True
     if savePhase_masks:
-        np.save(f"{save_folder}/optimized_phase_mask_1.npy", phase_mask_1)
-        np.save(f"{save_folder}/optimized_phase_mask_2.npy", phase_mask_2)
+        np.save(results_folder + "/optimized_phase_mask_1.npy", phase_mask_1)
+        np.save(results_folder + "/optimized_phase_mask_2.npy", phase_mask_2)
 
-    print(f"All plots saved to {save_folder}/ folder.")
+    last_optimum_value = solver.last_optimum_value()
+    print("Last optimum value: %.4e" % last_optimum_value)
+    print(f"All plots saved to {results_folder}/ folder.")
+    return last_optimum_value
+
+def update_phase_factors():
+    phase_factor_0[:] = k0 * d[0] * np.sqrt(1 - (lda0 * nu_parallel) ** 2 + 0*1j)
+    P_0[:] = np.exp(1j * phase_factor_0)
+    P_0_nat[:] = np.fft.ifftshift(P_0)
+    phase_factor_1[:] = k1 * d[1] * np.sqrt(1 - (lda1 * nu_parallel) ** 2 + 0*1j)
+    P_1[:] = np.exp(1j * phase_factor_1)
+    P_1_nat[:] = np.fft.ifftshift(P_1)
+    phase_factor_2[:] = k2 * d[2] * np.sqrt(1 - (lda2 * nu_parallel) ** 2 + 0*1j)
+    P_2[:] = np.exp(1j * phase_factor_2)
+    P_2_nat[:] = np.fft.ifftshift(P_2)
+
+    P_1_dagger[:] = P_1.T.conj()
+    P_2_dagger[:] = P_2.T.conj()
+    P_1_dagger_nat[:] = np.fft.ifftshift(P_1).T.conj()
+    P_2_dagger_nat[:] = np.fft.ifftshift(P_2).T.conj()
+
+def update_input_fields():
+    input_field[:] = propagate_source(source_field)
+    input_field_2d[:] = input_field.reshape((Nx, Ny)) #reshape to 2D for plotting
+    #save the input field to numpy array
+    #np.save("results/input_field.npy", input_field_2d)
+    #input field integrated intensity
+    input_field_intensity = np.sum(np.abs(input_field)**2)
+    print("Input field integrated intensity: %.4e" % input_field_intensity)
+    #make a plot and save the input field
+    make_2Dplot_of(input_field_2d, choose_quantity="amplitude", save_name="input_field_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+    make_2Dplot_of(input_field_2d, choose_quantity="phase", save_name="input_field_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+
+def initialize_phase_masks():
+    #initialize the normalized phase masks and global phase mask
+    w_norm[:] = np.zeros((2*S)) #concatenated normalized parameters for both masks
+    X, Y = np.meshgrid(np.linspace(-size_x/2, size_x/2, Nx), np.linspace(-size_y/2, size_y/2, Ny))
+    rho = np.sqrt(X**2 + Y**2)
+    circular_mask_1 = np.where(rho.flatten() < output_fiber_core_diameter/3, 1, 0)
+    #w_norm[:S] += circular_mask_1
+    target_pattern_phase = (np.angle(target_Efield) + 2 * np.pi) % (2 * np.pi)*circular_mask_1 #make sure the phase is between 0 and 2pi
+    w_norm[S:] += target_pattern_phase / (2 * np.pi) #normalize the target phase to be between 0 and 1
+    phase_mask[:] = phase_given_w(w_norm)
+
+def reset_globals():
+    opt_history[:] = []
+    w_norm[:] = np.zeros((2*S))
+    phase_mask[:] = phase_given_w(w_norm)
+    d[:] = np.zeros((3,))
+
+def metaprop_update(x):
+    '''Objective function called from EGO loop. Given a set of input design parameters x,
+    it updates the system and calls the inner adjoint-based optimization.
+    Changing the system distance parameters requires updating the following terms:
+    1) propagation matrices
+    2) input field'''
+
+    if not os.path.exists(f'{results_folder}/metaprop_results.txt'):
+        with open(f'{results_folder}/metaprop_results.txt', 'w') as f:
+            f.write("d1 [m] d2 [m] d3 [m] ob1 ob2 t\n")
+    
+    m, n = x.shape
+    C = np.zeros((m,1))
+    for i in range(m):
+        for j in range(n):
+            d[j] = 1e-6*np.round(x[i,j]) #update the global propagation distances with the new design parameters
+
+        d[-1] = d[0]
+        assert np.all(d), "Propagation distances must be real-positive."
+        print("Current propagation distances: ", d)
+        update_phase_factors() #update the phase factors for the new propagation distances
+        update_input_fields()
+        initialize_phase_masks()
+        print("USING D=",d)
+        last_optimum_value = metaprop() #solve the inner optimization problem for the given design parameters
+
+        #save all the partial results for a specific set of design parameters x to a text file
+        #in append mode, so that we can keep track of the optimization history
+        with open(f'{results_folder}/metaprop_results.txt', 'a') as f:
+            f.write(f"{d[0]:.6e} {d[1]:.6e} {d[2]:.6e} {last_optimum_value:.6e}\n")
+
+        print("Current cost function value: ", opt_history[-1])
+        C[i] = -last_optimum_value #remember ego does minimization
+
+        reset_globals()   
+    return C
+
+def run_ego():
+    ##############################
+    #EGO setup
+    ##############################
+    n_ego_iter = 30
+    xlimits = np.array([[100,700], [100,700]])
+    seed = 777
+    design_space = DesignSpace(xlimits, seed=seed)
+    criterion = 'EI'
+    ndoe = 20
+
+    #build DOE
+    sampling = LHS(xlimits=xlimits, seed=seed)
+    xdoe = sampling(ndoe)
+
+    sm = KRG(design_space=design_space, n_start=25, print_global=False)
+    ego = EGO(
+        n_iter=n_ego_iter,
+        criterion=criterion,
+        xdoe=xdoe,
+        surrogate=sm,
+        n_start=25,
+    )
+
+    x_opt, y_opt, ind_best, x_data, y_data = ego.optimize(fun=metaprop_update)
+    #save the optimization results to a text file    
+    np.savetxt(f'{results_folder}/ego_opt_results.txt', np.hstack((x_opt,y_opt)))
+
+if __name__ == "__main__":
+    run_ego()
