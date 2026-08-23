@@ -60,14 +60,8 @@ rho = np.sqrt(X**2 + Y**2)
 #LOAD PHASE MASK
 #___________________________________________________
 #load the phase mask data
-phase_mask_filename = "../results_sym/optimized_phase_mask_1.npy"
+phase_mask_filename = "results_sym/optimized_phase_mask_1.npy"
 phase_mask = np.load(phase_mask_filename)
-
-fig, ax = plt.subplots()
-im = ax.pcolormesh(X, Y, phase_mask, cmap='hsv', shading='auto')
-ax.set_xlabel('X [um]')
-ax.set_ylabel('Y [um]')
-fig.show()
 
 #sim_domain_pixel_size = #full simulation domain (full axis)
 sim_domain_size = 140 #[um]
@@ -88,63 +82,8 @@ X_sim, Y_sim = np.meshgrid(xs_sim, ys_sim)
 
 phase_mask_quadrant = phase_mask[nx:, ny:]
 
-fig, ax = plt.subplots()
-im = ax.pcolormesh(X_quadrant, Y_quadrant, phase_mask_quadrant, cmap='hsv', shading='auto')
-ax.set_xlabel('X [um]')
-ax.set_ylabel('Y [um]')
-ax.set_ybound(0,sim_domain_size/2)
-ax.set_xbound(0,sim_domain_size/2)
-fig.show()
-
-
-
-####################################################
-#UNIT CELL DATA
-#___________________________________________________
-#import the unit-cell transmission coefficient data
-unit_cell_diameters = np.load("../unit_cell/unit_cell_center_1550_h900nm_res50_wvl_diameters.npy")
-unit_cell_mode_phase = np.load("../unit_cell/unit_cell_center_1550_h900nm_res50_wvl_mode_phase.npy")
-unit_cell_mode_phase = np.unwrap(unit_cell_mode_phase - unit_cell_mode_phase[0]) #normalize to 0 phase at smallest diameter
-unit_cell_mode_tran = np.load("../unit_cell/unit_cell_center_1550_h900nm_res50_wvl_mode_tran.npy")
-
-#make a plot of the unit-cell transmission coefficient
-fig, ax = plt.subplots(1, 2, figsize=(10, 4))
-ax[0].plot(unit_cell_diameters, unit_cell_mode_phase, 'r-', marker='o', label='Phase')
-ax[0].set_xlabel('Diameter (um)')
-ax[0].set_ylabel('Phase (rad)')
-ax[1].plot(unit_cell_diameters, unit_cell_mode_tran, 'b-', marker='o', label='Transmission')
-ax[1].set_xlabel('Diameter (um)')
-ax[1].set_ylabel('Amplitude')
-ax[0].legend()
-ax[1].legend()
-plt.show()
-####################################################
-
-pillars_geo = []
-D_vals = []
-theta = unit_cell_mode_phase
-
-for i, x in enumerate(xs_sim_quadrant):
-    for j, y in enumerate(ys_sim_quadrant):
-        if np.sqrt(x**2 + y**2) > max_sim_radius:
-            continue
-        else:
-            required_diameter = np.interp(phase_mask_quadrant[i,j], theta, unit_cell_diameters)
-            #round the required diameter up to three decimal places (nm)
-            required_diameter = np.round(required_diameter, 3)
-            D_vals.append(required_diameter)
-            pillar_geo = mp.Cylinder(
-                material=si,
-                radius=required_diameter/2, 
-                height=h,
-                center=mp.Vector3(x, y, h/2), 
-                axis=mp.Vector3(0, 0, 1),
-            )
-            pillars_geo.append(pillar_geo)
-print("Number of pillars in simulation domain: ", len(pillars_geo))
-
 #import the input field (just before MS1)
-input_field = np.load("../results_sym/input_field.npy")
+input_field = np.load("results_sym/input_field.npy")
 
 mask = (np.abs(X) <= sim_domain_size/2) & (np.abs(Y) <= sim_domain_size/2)
 
@@ -153,20 +92,6 @@ Ex_field_after_MS1 = input_field * np.exp(1j*phase_mask) / np.max(np.abs(input_f
 
 Ex_field_after_MS1_sim = Ex_field_after_MS1[mask].reshape((len(xs_sim), len(ys_sim)))
 Hy_field_after_MS1_sim = Ex_field_after_MS1_sim / eta_0
-
-fig, ax = plt.subplots()
-im = ax.pcolormesh(X_sim, Y_sim, np.abs(Ex_field_after_MS1_sim))
-ax.set_xlabel('X [um]')
-ax.set_ylabel('Y [um]')
-
-fig.colorbar(im, ax=ax)
-
-fig,ax = plt.subplots()
-im = ax.pcolormesh(X_sim, Y_sim, (np.angle(Ex_field_after_MS1_sim)+2*np.pi)%(2*np.pi), cmap='hsv', shading='auto')
-ax.set_xlabel('X [um]')
-ax.set_ylabel('Y [um]')
-
-fig.colorbar(im, ax=ax)
 
 # [markdown]
 # for the equivalence principle, if we want to use the field after MS1
@@ -220,7 +145,6 @@ sim = mp.Simulation(
     symmetries = [mp.Mirror(0, phase=-1), mp.Mirror(1, phase=+1)]
 )
 
-
 #far field points for projection monitor
 ff_resolution = 5
 ff_plane_size = 30 #[um]
@@ -253,7 +177,6 @@ obs_point = mp.Vector3(0,0,0)
 stop_cond = mp.stop_when_fields_decayed(50, mp.Ez, obs_point, 1e-9)
 
 sim.run(until_after_sources=stop_cond)
-
 
 far_plane = mp.Volume(
     center=mp.Vector3(0, 0, projection_distance),
