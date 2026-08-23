@@ -73,9 +73,9 @@ rho = np.sqrt(X**2 + Y**2)
 
 sampling_period = xs[1] - xs[0]
 
-d0 = 535e-6 #propagation distance: source - MS1 [m]
+d0 = 353e-6 #propagation distance: source - MS1 [m]
 d_source = d0 - lda0 / 2  #propagation distance: source - MS1 used for FDTD simulations [m]
-d1 = 415e-6 #propagation distance: MS1 - MS2 [m]
+d1 = 218e-6 #propagation distance: MS1 - MS2 [m]
 d2 = d0 #propagation distance: MS2 - target [m]
 
 phase_min = 0
@@ -539,8 +539,8 @@ def forward_propagate() -> None:
     intermediate_fields[1] = np.fft.fftshift(ifft_operator.output_array.copy())
     
     end_time = time.time()
-    #make_2Dplot_of(intermediate_fields[0], choose_quantity="amplitude", save_name="intermediate_field_1_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
-    #make_2Dplot_of(intermediate_fields[1], choose_quantity="amplitude", save_name="intermediate_field_2_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
+    make_2Dplot_of(intermediate_fields[0], choose_quantity="amplitude", save_name="intermediate_field_1_amplitude", plot_zoom_x=zoom_output_fiber_radius, plot_zoom_y=zoom_output_fiber_radius)
+    make_2Dplot_of(intermediate_fields[1], choose_quantity="amplitude", save_name="intermediate_field_2_amplitude", plot_zoom_x=zoom_output_fiber_radius, plot_zoom_y=zoom_output_fiber_radius)
     
     print("Propagation finished in {:.6f} seconds.".format(end_time - start_time))
 

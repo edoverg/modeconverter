@@ -230,7 +230,7 @@ ys_far = np.linspace(-ff_plane_size/2, ff_plane_size/2, ff_resolution * ff_plane
 
 X_far, Y_far = np.meshgrid(xs_far, ys_far)
 
-projection_distance = h + d1 - lda0 / 2
+projection_distance = d1 - np.abs(source_position.z)
 
 near_region_monitor = mp.Near2FarRegion(
     center=mp.Vector3(0, 0, 0),
