@@ -456,8 +456,8 @@ print("Input field integrated intensity: %.4e" % input_field_intensity)
 #make a plot and save the input field
 make_2Dplot_of(input_field_2d, choose_quantity="amplitude", save_name="input_field_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
 make_2Dplot_of(input_field_2d, choose_quantity="phase", save_name="input_field_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
-make_2Dplot_of(input_field_before_MS1.reshape((Nx, Ny)), choose_quantity="amplitude", save_name="input_field_before_MS1_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
-make_2Dplot_of(input_field_before_MS1.reshape((Nx, Ny)), choose_quantity="phase", save_name="input_field_before_MS1_phase", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
+make_2Dplot_of(input_field_before_MS1.reshape((Nx, Ny)), choose_quantity="amplitude", save_name="input_field_before_MS1_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+make_2Dplot_of(input_field_before_MS1.reshape((Nx, Ny)), choose_quantity="phase", save_name="input_field_before_MS1_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
 ###########################
 
 ###########################
@@ -468,8 +468,8 @@ target_Efield_2d = fiber_mode_pattern / np.sqrt(np.sum(np.abs(fiber_mode_pattern
 target_Efield =  target_Efield_2d.flatten() #normalized target field (intensity = 1)
 
 # Plot: Target field
-make_polarPlot_of(target_Efield_2d, choose_quantity="amplitude", save_name="target_field_1_amplitude_polar", plot_zoom_r=zoom_output_fiber_radius)
-make_polarPlot_of(target_Efield_2d, choose_quantity="phase", save_name="target_field_1_phase_polar", plot_zoom_r=zoom_output_fiber_radius)
+make_2Dplot_of(target_Efield_2d, choose_quantity="amplitude", save_name="target_field_1_amplitude_polar", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+make_2Dplot_of(target_Efield_2d, choose_quantity="phase", save_name="target_field_1_phase_polar", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
 ###########################
 
 ###########################
@@ -687,7 +687,7 @@ if __name__ == "__main__":
     #save the output field for later use
     save_output_field = True
     if save_output_field:
-        np.save(f"{save_folder}/intermediate_field_0.npy", intermediate_fields[0].reshape((Nx, Ny)))
+        np.save(f"{save_folder}/intermediate_field_1.npy", intermediate_fields[0].reshape((Nx, Ny)))
         np.save(f"{save_folder}/optimized_output_field.npy", output_field.reshape((Nx, Ny)))
     # Plot results in individual PDF figures
     

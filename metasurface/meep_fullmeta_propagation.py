@@ -35,8 +35,8 @@ unit_cell_pitch = P
 h = 0.9 #pillar height [um]
 
 #propgation distances
-d0 = 535 #[um]
-d1 = 415 #[um]
+d0 = 353 #[um]
+d1 = 218 #[um]
 d2 = d0 #[um]
 
 Nx = 1025 #pixels per dimension
