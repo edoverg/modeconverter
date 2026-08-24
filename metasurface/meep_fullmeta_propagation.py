@@ -146,8 +146,8 @@ sim = mp.Simulation(
 )
 
 #far field points for projection monitor
-ff_resolution = 5
-ff_plane_size = 30 #[um]
+ff_resolution = 3
+ff_plane_size = 60 #[um]
 
 xs_far = np.linspace(-ff_plane_size/2, ff_plane_size/2, ff_resolution * ff_plane_size)
 ys_far = np.linspace(-ff_plane_size/2, ff_plane_size/2, ff_resolution * ff_plane_size)
