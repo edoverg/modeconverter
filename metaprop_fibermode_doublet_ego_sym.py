@@ -1,12 +1,14 @@
 import time
 import multiprocessing
 
+from mpi4py.futures import MPIPoolExecutor
+
 import pyfftw
 #pyFFTW setup
-n_cpu = multiprocessing.cpu_count()
+n_cpu = 1
 pyfftw.config.NUM_THREADS = n_cpu
-pyfftw.interfaces.cache.enable()
-pyfftw.config.PLANNER_EFFORT = 'FFTW_MEASURE'
+pyfftw.interfaces.cache.disable()
+pyfftw.config.PLANNER_EFFORT = 'FFTW_ESTIMATE'  # Use ESTIMATE for deterministic behavior (no algorithm measurement)
 
 import nlopt
 
@@ -23,12 +25,9 @@ from smt.sampling_methods import LHS
 from smt.design_space import (
     DesignSpace,
 ) 
-
-
+import pickle
 import os
-results_folder = "results_symm_ego"
-if not os.path.exists(results_folder):
-    os.makedirs(results_folder)
+results_folder = "results_symm_ego_testing"
 
 ##############################
 #physics and simulation domain
@@ -59,17 +58,26 @@ S = Nx * Ny
 size_x = unit_cell_pitch * Nx #actual physical size
 size_y = unit_cell_pitch * Ny
 
-xs = np.linspace(-size_x/2, size_x/2 - size_x / Nx, Nx)
-ys = np.linspace(-size_y/2, size_y/2 - size_y / Ny, Ny)
+xs = np.arange(-Nx//2+1, Nx//2+1) * (size_x / Nx)
+ys = np.arange(-Ny//2+1, Ny//2+1) * (size_y / Ny)
+
+#important checks on spatial grid
+try:
+    assert(len(xs) == Nx)
+    assert(len(ys) == Ny)
+    assert(xs[0] == xs[-1]*-1)
+    assert(ys[0] == ys[-1]*-1)
+    assert(xs[nx]==0)
+    assert(ys[ny]==0)
+    assert(np.abs(np.abs(xs[1]-xs[0]) - unit_cell_pitch) < 1e-12)
+except:
+    raise ValueError("Error while setting up the spatial grid.")
 
 X, Y = np.meshgrid(xs, ys)
 rho = np.sqrt(X**2 + Y**2)
 
 sampling_period = xs[1] - xs[0]
 
-d0 = 0 #propagation distance: source - MS1
-d1 = 0 #propagation distance: MS1 - MS2
-d2 = d0 #propagation distance: MS2 - target
 d = np.zeros((3,))
 
 phase_min = 0
@@ -93,14 +101,14 @@ fft_output_array = pyfftw.empty_aligned((Nx, Ny), dtype='complex128', n=16)
 ifft_input_array = pyfftw.empty_aligned((Nx, Ny), dtype='complex128', n=16)
 ifft_output_array = pyfftw.empty_aligned((Nx, Ny), dtype='complex128', n=16)
 
-fft_operator = pyfftw.FFTW(fft_input_array, fft_output_array, axes=(0,1), direction='FFTW_FORWARD', threads=n_cpu, flags=('FFTW_MEASURE','FFTW_DESTROY_INPUT',))
-ifft_operator = pyfftw.FFTW(ifft_input_array, ifft_output_array, axes=(0,1), direction='FFTW_BACKWARD', threads=n_cpu, flags=('FFTW_MEASURE','FFTW_DESTROY_INPUT',))
+fft_operator = pyfftw.FFTW(fft_input_array, fft_output_array, axes=(0,1), direction='FFTW_FORWARD', threads=n_cpu, flags=('FFTW_ESTIMATE',))
+ifft_operator = pyfftw.FFTW(ifft_input_array, ifft_output_array, axes=(0,1), direction='FFTW_BACKWARD', threads=n_cpu, flags=('FFTW_ESTIMATE',))
 ##############################
 
 ##############################
 #setting up spatial frequencies
 ks = 2 * np.pi / sampling_period
-kappas = np.arange(-Nx//2, Nx//2) * ks / Nx
+kappas = np.arange(-Nx//2+1, Nx//2+1) * ks / Nx
 KX, KY = np.meshgrid(kappas, kappas)
 K_parallel = np.sqrt(KX**2 + KY**2)
 nu_parallel = K_parallel / (2 * np.pi)
@@ -146,7 +154,7 @@ def get_pattern() -> np.ndarray:
 
     return pattern.flatten()
 
-def get_fiber_mode_pattern(mode_list:list)->list:
+def get_fiber_mode_pattern(mode_list:list):
     '''Returns the fiber mode pattern for the selected n index.
     Args:
         mode_list: the list of the selected fiber mode indices
@@ -406,10 +414,10 @@ source_field = get_source_field(beam_waist)
 source_field_2d = source_field.reshape((Nx, Ny)) #reshape to 2D for plotting
 #source field integrated intensity
 source_power = np.sum(np.abs(source_field)**2)
-print("Source field integrated intensity: %.4e" % source_power)
+#print("Source field integrated intensity: %.4e" % source_power)
 #make a plot and save the source field
-make_2Dplot_of(source_field_2d, choose_quantity="amplitude", save_name="source_field_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
-make_2Dplot_of(source_field_2d, choose_quantity="phase", save_name="source_field_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+#make_2Dplot_of(source_field_2d, choose_quantity="amplitude", save_name="source_field_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+#make_2Dplot_of(source_field_2d, choose_quantity="phase", save_name="source_field_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
 ###########################
 
 ###########################
@@ -417,13 +425,13 @@ make_2Dplot_of(source_field_2d, choose_quantity="phase", save_name="source_field
 input_field = propagate_source(source_field)
 input_field_2d = input_field.reshape((Nx, Ny)) #reshape to 2D for plotting
 #save the input field to numpy array
-np.save(results_folder + "/input_field.npy", input_field_2d)
+#np.save(f'{results_folder}/input_field_{d[0]}_{d[1]}.npy', input_field_2d)
 #input field integrated intensity
 input_field_intensity = np.sum(np.abs(input_field)**2)
-print("Input field integrated intensity: %.4e" % input_field_intensity)
+#print("Input field integrated intensity: %.4e" % input_field_intensity)
 #make a plot and save the input field
-make_2Dplot_of(input_field_2d, choose_quantity="amplitude", save_name="input_field_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
-make_2Dplot_of(input_field_2d, choose_quantity="phase", save_name="input_field_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+#make_2Dplot_of(input_field_2d, choose_quantity="amplitude", save_name="input_field_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+#make_2Dplot_of(input_field_2d, choose_quantity="phase", save_name="input_field_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
 ###########################
 
 ###########################
@@ -434,14 +442,13 @@ target_Efield_2d = fiber_mode_pattern / np.sqrt(np.sum(np.abs(fiber_mode_pattern
 target_Efield =  target_Efield_2d.flatten() #normalized target field (intensity = 1)
 
 # Plot: Target field
-make_polarPlot_of(target_Efield_2d, choose_quantity="amplitude", save_name="target_field_1_amplitude_polar", plot_zoom_r=zoom_output_fiber_radius)
-make_polarPlot_of(target_Efield_2d, choose_quantity="phase", save_name="target_field_1_phase_polar", plot_zoom_r=zoom_output_fiber_radius)
+#make_polarPlot_of(target_Efield_2d, choose_quantity="amplitude", save_name="target_field_1_amplitude_polar", plot_zoom_r=zoom_output_fiber_radius)
+#make_polarPlot_of(target_Efield_2d, choose_quantity="phase", save_name="target_field_1_phase_polar", plot_zoom_r=zoom_output_fiber_radius)
 ###########################
 
 ###########################
 #initialize the normalized phase masks and global phase mask
 w_norm = np.zeros((2*S)) #concatenated normalized parameters for both masks
-X, Y = np.meshgrid(np.linspace(-size_x/2, size_x/2, Nx), np.linspace(-size_y/2, size_y/2, Ny))
 rho = np.sqrt(X**2 + Y**2)
 circular_mask_1 = np.where(rho.flatten() < output_fiber_core_diameter/3, 1, 0)
 #w_norm[:S] += circular_mask_1
@@ -473,7 +480,7 @@ def forward_propagate() -> None:
     Returns:
         None
     '''
-    print("Starting propagating...")
+    #print("Starting propagating...")
     start_time = time.time()
 
     fft_input_array[:,:] = np.fft.ifftshift((input_field * np.exp(1j * phase_mask[:S])).reshape((Nx, Ny)))
@@ -495,7 +502,7 @@ def forward_propagate() -> None:
     
     ifft_operator()
     intermediate_fields[0] = np.fft.fftshift(ifft_operator.output_array.copy())
-    print("Field intensity after first phase mask and propagation: %.4e" % np.sum(np.abs(intermediate_fields[0])**2))
+    #print("Field intensity after first phase mask and propagation: %.4e" % np.sum(np.abs(intermediate_fields[0])**2))
 
     fft_input_array[:,:] = np.fft.ifftshift(np.fft.fftshift(ifft_operator.output_array) * np.exp(1j * phase_mask[S:].reshape((Nx, Ny))))
     fft_operator()
@@ -507,7 +514,7 @@ def forward_propagate() -> None:
     #make_2Dplot_of(intermediate_fields[0], choose_quantity="amplitude", save_name="intermediate_field_1_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
     #make_2Dplot_of(intermediate_fields[1], choose_quantity="amplitude", save_name="intermediate_field_2_amplitude", plot_zoom_x=full_view_x, plot_zoom_y=full_view_y)
     
-    print("Propagation finished in {:.6f} seconds.".format(end_time - start_time))
+    #print("Propagation finished in {:.6f} seconds.".format(end_time - start_time))
 
 def reduce_symmetrized_gradient(g_full):
     g_2d = g_full.reshape((Nx, Ny))
@@ -528,7 +535,7 @@ def adjoint_propagate():
     Returns:
         the gradient of the cost function with respect to the phase mask (flattened)
     '''
-    print("Computing adjoint...")
+    #print("Computing adjoint...")
     start_time = time.time()
 
     Phi_1_dagger = np.exp(-1j * phase_mask[:S]).reshape((Nx, Ny))
@@ -550,7 +557,7 @@ def adjoint_propagate():
     grad_C_phi_1 = 2 * np.real(-1j * input_field_2d.conj() * np.fft.fftshift(ifft_operator.output_array) * Phi_1_dagger).flatten()
     
     end_time = time.time()
-    print("Adjoint finished in {:.6f} seconds.".format(end_time - start_time))
+    #print("Adjoint finished in {:.6f} seconds.".format(end_time - start_time))
     return grad_C_phi_1, grad_C_phi_2
 
 def _compute_cost():
@@ -591,16 +598,6 @@ def cost_fun(x, grad):
     C = _compute_cost() 
 
     opt_history.append(C)
-    iter_num[0] += 1
-    if iter_num[0] % 10 == 0:
-        plt.figure()
-        plt.plot(opt_history)
-        plt.xlabel('Iteration')
-        plt.ylabel('Cost Function Value')
-        plt.title('Optimization History')
-        plt.tight_layout()
-        plt.savefig(results_folder + "/modeconv1_optimization_history.pdf")
-        plt.close()
 
     if grad.size > 0:
         full_grad1, full_grad2 = adjoint_propagate()
@@ -612,6 +609,7 @@ def cost_fun(x, grad):
 
 def metaprop():
     #initialize nlopt solver
+    nlopt.srand(42)
     solver = nlopt.opt(nlopt.LD_CCSAQ, dof)
     
     solver.set_lower_bounds(mask_lower_bounds_symm.flatten())
@@ -619,7 +617,7 @@ def metaprop():
     solver.set_max_objective(cost_fun)
     solver.set_maxeval(opt_max_eval)
     solver.set_param("dual_ftol_rel", 1e-7)
-    solver.set_param("verbosity",1)
+    solver.set_param("verbosity",0)
 
     print("Starting optimization...")
     start = True
@@ -630,57 +628,13 @@ def metaprop():
 
     print("Optimization completed.")
 
-    #verify the results
-    phase_mask[:] = phase_given_w(w_norm)
-    forward_propagate()
-    field_input_ms2 = intermediate_fields[0]
-    output_field = intermediate_fields[-1]
-    
-    input_power = np.sum(np.abs(input_field)**2)
-    output_power = np.sum(np.abs(output_field)**2)
-
-    print("Norm. input power: %.4e" % input_power)
-    print("Norm. output power: %.4e" % output_power)
-
-    #save the output field for later use
-    save_output_field = True
-    if save_output_field:
-        np.save(results_folder + "/intermediate_field_0.npy", intermediate_fields[0].reshape((Nx, Ny)))
-        np.save(results_folder + "/optimized_output_field.npy", output_field.reshape((Nx, Ny)))
-    # Plot results in individual PDF figures
-    
-    # Reshape fields to 2D for visualization
-    output_field_2d = output_field.reshape((Nx, Ny))
-    phase_mask_1 = phase_given_w(w_norm[:S]).reshape((Nx, Ny))
-    phase_mask_2 = phase_given_w(w_norm[S:]).reshape((Nx, Ny))
-
-    phase_mask_zoom = 150
-    make_2Dplot_of(phase_mask_1, choose_quantity="phase_mask", save_name="phase_mask_1", plot_zoom_x=phase_mask_zoom, plot_zoom_y=phase_mask_zoom)
-    make_2Dplot_of(phase_mask_2, choose_quantity="phase_mask", save_name="phase_mask_2", plot_zoom_x=phase_mask_zoom, plot_zoom_y=phase_mask_zoom)
-
-    # Plot: Output field amplitude and phase
-    make_polarPlot_of(output_field_2d, choose_quantity="amplitude", save_name="optimized_output_field_amplitude", plot_zoom_r=zoom_output_fiber_radius)
-    make_polarPlot_of(output_field_2d, choose_quantity="phase", save_name="optimized_output_field_phase", plot_zoom_r=zoom_output_fiber_radius)
-    
-    slice_y_index = Ny//2
-    slice_x = xs * 1e6
-    slice_target = target_Efield.reshape((Nx, Ny))[slice_y_index,:]
-    slice_output = output_field.reshape((Nx, Ny))[slice_y_index,:]
-    make_1Dplot_of([slice_x, slice_x], [np.abs(slice_target), np.abs(slice_output)], plot_zoom_x=1e6*output_fiber_core_diameter, save_name="modeconv_output_vs_target_amplitude")
-    make_1Dplot_of([slice_x, slice_x], [(np.angle(slice_target)+2*np.pi)%(2*np.pi), (np.angle(slice_output)+2*np.pi)%(2*np.pi)], plot_zoom_x=1e6*output_fiber_core_diameter, save_name="modeconv_output_vs_target_phase")
-
-    #save the phase masks for later use
-    savePhase_masks = True
-    if savePhase_masks:
-        np.save(results_folder + "/optimized_phase_mask_1.npy", phase_mask_1)
-        np.save(results_folder + "/optimized_phase_mask_2.npy", phase_mask_2)
-
     last_optimum_value = solver.last_optimum_value()
     print("Last optimum value: %.4e" % last_optimum_value)
-    print(f"All plots saved to {results_folder}/ folder.")
+
     return last_optimum_value
 
 def update_phase_factors():
+    print("Phase factor distances: d0 = %.6f m, d1 = %.6f m, d2 = %.6f m" % (d[0], d[1], d[2]))
     phase_factor_0[:] = k0 * d[0] * np.sqrt(1 - (lda0 * nu_parallel) ** 2 + 0*1j)
     P_0[:] = np.exp(1j * phase_factor_0)
     P_0_nat[:] = np.fft.ifftshift(P_0)
@@ -702,28 +656,40 @@ def update_input_fields():
     #save the input field to numpy array
     #np.save("results/input_field.npy", input_field_2d)
     #input field integrated intensity
-    input_field_intensity = np.sum(np.abs(input_field)**2)
-    print("Input field integrated intensity: %.4e" % input_field_intensity)
+    #input_field_intensity = np.sum(np.abs(input_field)**2)
+    #print("Input field integrated intensity: %.4e" % input_field_intensity)
     #make a plot and save the input field
-    make_2Dplot_of(input_field_2d, choose_quantity="amplitude", save_name="input_field_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
-    make_2Dplot_of(input_field_2d, choose_quantity="phase", save_name="input_field_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+    #make_2Dplot_of(input_field_2d, choose_quantity="amplitude", save_name="input_field_amplitude", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
+    #make_2Dplot_of(input_field_2d, choose_quantity="phase", save_name="input_field_phase", plot_zoom_x=zoom_x, plot_zoom_y=zoom_y)
 
 def initialize_phase_masks():
     #initialize the normalized phase masks and global phase mask
     w_norm[:] = np.zeros((2*S)) #concatenated normalized parameters for both masks
-    X, Y = np.meshgrid(np.linspace(-size_x/2, size_x/2, Nx), np.linspace(-size_y/2, size_y/2, Ny))
     rho = np.sqrt(X**2 + Y**2)
     circular_mask_1 = np.where(rho.flatten() < output_fiber_core_diameter/3, 1, 0)
     #w_norm[:S] += circular_mask_1
     target_pattern_phase = (np.angle(target_Efield) + 2 * np.pi) % (2 * np.pi)*circular_mask_1 #make sure the phase is between 0 and 2pi
     w_norm[S:] += target_pattern_phase / (2 * np.pi) #normalize the target phase to be between 0 and 1
+
     phase_mask[:] = phase_given_w(w_norm)
+    
+    w_norm_symm_1 = symmetrize(w_norm[:S])
+    w_norm_symm_2 = symmetrize(w_norm[S:])
+    w_norm_symm[:] = np.concatenate((w_norm_symm_1, w_norm_symm_2), axis=0)
 
 def reset_globals():
     opt_history[:] = []
     w_norm[:] = np.zeros((2*S))
+    w_norm_symm[:] = np.zeros((dof))
     phase_mask[:] = phase_given_w(w_norm)
     d[:] = np.zeros((3,))
+
+    # 2. Hard zero the PyFFTW aligned memory buffers (including stride padding)
+    fft_input_array.fill(0)
+    fft_output_array.fill(0)
+    ifft_input_array.fill(0)
+    ifft_output_array.fill(0)
+
 
 def metaprop_update(x):
     '''Objective function called from EGO loop. Given a set of input design parameters x,
@@ -732,63 +698,424 @@ def metaprop_update(x):
     1) propagation matrices
     2) input field'''
 
-    if not os.path.exists(f'{results_folder}/metaprop_results.txt'):
-        with open(f'{results_folder}/metaprop_results.txt', 'w') as f:
-            f.write("d1 [m] d2 [m] d3 [m] ob1 ob2 t\n")
+    #if not os.path.exists(f'{results_folder}/metaprop_results.txt'):
+    #    with open(f'{results_folder}/metaprop_results.txt', 'w') as f:
+    #        f.write("d0 [m] d1 [m] d2 [m] ob1 ob2 t\n")
+    reset_globals()
+    try:
+        if x.shape[1]>1:
+            x = x.flatten()
+    except:
+        pass
+    C = 0
+    for j in range(len(x)):
+        #d[j] = 1e-6*np.round(x[j]) #update the global propagation distances with the new design parameters
+        #truncatge the x[j] value to 0 decimal places
+        d[j] = 1e-6*np.round(x[j], 0) #update the global propagation distances with the new design parameters
+
+    d[-1] = d[0]
+    assert np.all(d), "Propagation distances must be real-positive."
+    print(f"Current propagation distances: d0 = {d[0]:.6f} m, d1 = {d[1]:.6f} m, d2 = {d[2]:.6f} m")
     
-    m, n = x.shape
-    C = np.zeros((m,1))
-    for i in range(m):
-        for j in range(n):
-            d[j] = 1e-6*np.round(x[i,j]) #update the global propagation distances with the new design parameters
+    update_phase_factors() #update the phase factors for the new propagation distances
+    update_input_fields()
+    initialize_phase_masks()
+    last_optimum_value = metaprop() #solve the inner optimization problem for the given design parameters
+    C = -last_optimum_value #remember ego does minimization
+    #save all the partial results for a specific set of design parameters x to a text file
+    #in append mode, so that we can keep track of the optimization history
+    with open(f'{results_folder}/ego_evaluations.txt', 'a') as f:
+        f.write(f"{d[0]:.6e} {d[1]:.6e} {last_optimum_value:.6e}\n")
 
-        d[-1] = d[0]
-        assert np.all(d), "Propagation distances must be real-positive."
-        print("Current propagation distances: ", d)
-        update_phase_factors() #update the phase factors for the new propagation distances
-        update_input_fields()
-        initialize_phase_masks()
-        print("USING D=",d)
-        last_optimum_value = metaprop() #solve the inner optimization problem for the given design parameters
+    #print("Current cost function value: ", opt_history[-1])
+    if hot_start: 
+        return d[0], d[1], C
+    else:
+        return C
 
-        #save all the partial results for a specific set of design parameters x to a text file
-        #in append mode, so that we can keep track of the optimization history
-        with open(f'{results_folder}/metaprop_results.txt', 'a') as f:
-            f.write(f"{d[0]:.6e} {d[1]:.6e} {d[2]:.6e} {last_optimum_value:.6e}\n")
+from scipy.stats import norm
+from scipy.optimize import minimize
+import matplotlib.image as mpimg
+import matplotlib.animation as animation
+import copy
 
-        print("Current cost function value: ", opt_history[-1])
-        C[i] = -last_optimum_value #remember ego does minimization
+def EI(GP, points, f_min):
+    pred = GP.predict_values(points)
+    var = GP.predict_variances(points)
+    args0 = (f_min - pred) / np.sqrt(var)
+    args1 = (f_min - pred) * norm.cdf(args0)
+    args2 = np.sqrt(var) * norm.pdf(args0)
 
-        reset_globals()   
-    return C
+    if var.size == 1 and var == 0.0:  # can be use only if one point is computed
+        return 0.0
 
-def run_ego():
+    ei = args1 + args2
+    return ei[0,0]
+hot_start = True
+def run_ego(design_space, n_ego_iter, criterion, xdoe_train, ydoe_train, xlimits):
+    if not hot_start:#cold start
+        sm = KRG(design_space=design_space, n_start=25, print_global=False)
+        ego = EGO(
+            n_iter=n_ego_iter,
+            criterion=criterion,
+            xdoe=xdoe_train,
+            ydoe=ydoe_train,
+            surrogate=sm,
+            n_start=25,
+        )
+        #note that x_data contains the original train set plus the EGO evaluated points
+        x_opt, y_opt, ind_best, x_data, y_data = ego.optimize(fun=metaprop_update) 
+        #save the optimization results to a text file
+        np.savetxt(f'{results_folder}/ego_opt_results.txt', np.hstack((x_opt,y_opt)))
+        return x_opt, y_opt, ind_best, x_data, y_data
+    else:#hot start
+        #load the best surrogate model that was generated after cross-validation
+        sm = pickle.load(open(f'{results_folder}/best_surrogate_model.pkl', 'rb'))
+        #load the associated fold training data
+        doe_train = pickle.load(open(f'{results_folder}/best_surrogate_model_training_data.pkl', 'rb'))
+        xdoe_train_loaded, ydoe_train_loaded = doe_train
+        x_data = copy.deepcopy(xdoe_train_loaded)
+        y_data = copy.deepcopy(ydoe_train_loaded)
+        n_start = 25 #number of initial random points to sample for EGO refinement
+        x_et_k_tested_history = []
+        EI_history = []
+        for k in range(n_ego_iter):
+            d0_start = np.atleast_2d(xlimits[0][0] + np.random.rand(n_start)*(xlimits[0][1]-xlimits[0][0]))
+            d1_start = np.atleast_2d(xlimits[1][0] + np.random.rand(n_start)*(xlimits[1][1]-xlimits[1][0]))
+            x_start = np.hstack((d0_start.T, d1_start.T))
+            f_min_k = np.min(y_data)
+            opt_all = np.array(#maximizes the expected improvement in a region around x_st, an element of the start point
+                [
+                    minimize(lambda x: float(-EI(sm, np.atleast_2d(x), f_min_k)), x_st, method="SLSQP", bounds=xlimits)
+                    for x_st in x_start
+                ]
+            )
+            opt_success = opt_all[[opt_i["success"] for opt_i in opt_all]]
+            obj_success = np.array([opt_i["fun"] for opt_i in opt_success])
+            ind_min = np.argmin(obj_success)
+            #save the minimum EI value for this iteration to the history
+            EI_history.append(-obj_success[ind_min])
+            opt = opt_success[ind_min]
+            #select the non-optimal points for history purposes. Later, we will plot
+            #all the non-optimal points with crosses to show the search process of the n_start points
+            non_optimal_points = [opt_i["x"] for i, opt_i in enumerate(opt_all) if i != ind_min]
+            x_et_k = opt["x"] #this is the coordinate of the most interesting point: the one that maximizes the EI
+            d0, d1, y_et_k = metaprop_update(x_et_k) #evaluate the objective function at the new point
+            x_et_k_tested = np.atleast_2d([d0,d1])
+            x_et_k_tested_history.append(x_et_k_tested)
+
+            d0_EI = np.linspace(xlimits[0][0], xlimits[0][1], 100)
+            d1_EI = np.linspace(xlimits[1][0], xlimits[1][1], 100)
+            d0_EI_grid, d1_EI_grid = np.meshgrid(d0_EI, d1_EI)
+            EI_grid = np.zeros_like(d0_EI_grid)
+            for i in range(d0_EI_grid.shape[0]):
+                for j in range(d0_EI_grid.shape[1]):
+                    EI_grid[i,j] = EI(sm, np.atleast_2d([d0_EI_grid[i,j], d1_EI_grid[i,j]]), f_min_k)
+            plt.figure(figsize=(8,6))
+            plt.contourf(d0_EI_grid, d1_EI_grid, EI_grid, levels=50, cmap='viridis')
+            plt.colorbar(label='Expected Improvement')
+            #scatter the full history of tested points up to the current iteration k, the current point is red, the others are blue
+            x_et_k_tested_history_array = np.vstack(x_et_k_tested_history)*1e6
+            #scatter last point in red, the others in blue
+            plt.scatter(x_et_k_tested_history_array[:-1,0], x_et_k_tested_history_array[:-1,1], color='blue', label='Previous best')
+            plt.scatter(x_et_k_tested_history_array[-1,0], x_et_k_tested_history_array[-1,1], color='red', label='Best point')
+            #also plot the non optimal points with crosses for this iteration
+            if len(non_optimal_points) > 0:
+                non_optimal_points_array = np.vstack(non_optimal_points)
+                plt.scatter(non_optimal_points_array[:,0], non_optimal_points_array[:,1], color='orange', marker='x', label='Candidate')
+            plt.title(f'EGO Iteration {k+1}/{n_ego_iter}')
+            plt.xlabel('d0 [um]')
+            plt.ylabel('d1 [um]')
+            plt.xlim(xlimits[0])
+            plt.ylim(xlimits[1])
+            plt.legend(loc='upper left', framealpha=0.5)
+            plt.tight_layout()
+            plt.savefig(f'{results_folder}/Optimisation_{k}.png')
+            plt.close()
+
+            y_data = np.atleast_2d(np.append(y_data, y_et_k)).reshape(-1,1)
+            x_data = np.atleast_2d(np.append(x_data, x_et_k_tested*1e6, axis=0))
+            sm.set_training_values(x_data, y_data)
+            sm.train() #train the model with the new data point
+            print(f"{k}-th EGO refinement complete")
+            #for this k iteration out of the n_start, make a plot of the EI surface and append the poisition of the 
+            #selected point. Save the figure to a plot list ims, which will be used to create an animation at the end of the EGO loop
+            #To test the EI surface, use a custom grid of d0,d1 points, and compute the EI for each point in the grid. Then plot the EI surface as a contour plot, and mark the selected point with a red dot.
+            
+        ind_best = np.argmin(y_data)
+        x_opt = x_data[ind_best]
+        y_opt = y_data[ind_best]
+        np.savetxt(f'{results_folder}/ego_opt_results.txt', np.hstack((x_opt,y_opt)))
+        ims = []
+        fig = plt.figure(figsize=[10, 10])
+
+        ax = plt.gca()
+        ax.axes.get_xaxis().set_visible(False)
+        ax.axes.get_yaxis().set_visible(False)
+
+        for k in range(n_ego_iter):
+            image_pt = mpimg.imread(f"{results_folder}/Optimisation_{k}.png")
+            im = plt.imshow(image_pt)
+            ims.append([im])
+
+        ani = animation.ArtistAnimation(fig, ims, interval=500)
+        #save the animation to a gif file
+        ani.save(f'{results_folder}/ego_optimization.gif', writer='pillow')
+
+        #plot of the EI history
+        plt.figure(figsize=(8,6))
+        plt.plot(range(1, n_ego_iter+1), EI_history, marker='o')
+        plt.title('Expected Improvement History')
+        plt.xlabel('EGO Iteration')
+        plt.ylabel('Expected Improvement')
+        plt.grid()
+        plt.tight_layout()
+        plt.savefig(f'{results_folder}/EI_history.pdf')
+        plt.close()
+
+        #surface plot of the refined surrogate model
+        d0_grid = np.linspace(xlimits[0][0], xlimits[0][1], 100)
+        d1_grid = np.linspace(xlimits[1][0], xlimits[1][1], 100)
+        d0_grid_mesh, d1_grid_mesh = np.meshgrid(d0_grid, d1_grid)
+        d_grid = np.column_stack((d0_grid_mesh.flatten(), d1_grid_mesh.flatten()))
+        sm_predictions = sm.predict_values(d_grid).reshape(d0_grid_mesh.shape)
+        fig = plt.figure(figsize=(8,6))
+        ax = fig.add_subplot(111, projection='3d')
+        surf = ax.plot_surface(d0_grid_mesh, d1_grid_mesh, -sm_predictions, cmap='viridis', alpha=0.7, edgecolor='none')
+        ax.scatter(xdoe_train_loaded[:,0], xdoe_train_loaded[:,1], -ydoe_train_loaded.flatten(), color='blue', label='DOE Points')
+        ax.scatter(x_data[len(xdoe_train_loaded):,0], x_data[len(xdoe_train_loaded):,1], -y_data[len(xdoe_train_loaded):].flatten(), color='red', label='EGO Evaluated Points')
+        ax.scatter([x_opt[0]], [x_opt[1]], [-y_opt], color='green', s=100, label='Best Point', edgecolor='black')
+        ax.set_xlabel('d0 [um]')
+        ax.set_ylabel('d1 [um]')
+        ax.legend()
+        plt.tight_layout()
+        plt.savefig(f'{results_folder}/refined_surrogate_model_surface.pdf')
+        plt.close()
+        #contour plot
+        plt.figure(figsize=(8,6))
+        cp = plt.contourf(d0_grid_mesh, d1_grid_mesh, -sm_predictions, levels=50, cmap='viridis')
+        plt.colorbar(cp, label='Surrogate Model Prediction')
+        plt.scatter(xdoe_train_loaded[:,0], xdoe_train_loaded[:,1], color='blue', label='DOE Points')
+        plt.scatter(x_data[len(xdoe_train_loaded):,0], x_data[len(xdoe_train_loaded):,1], color='red', label='EGO Evaluated Points')
+        plt.scatter([x_opt[0]], [x_opt[1]], color='green', s=100, label='Best Point', edgecolor='black')
+        plt.xlabel('d0 [um]')
+        plt.ylabel('d1 [um]')
+        plt.xlim(xlimits[0])
+        plt.ylim(xlimits[1])
+        plt.legend(framealpha=0.5)
+        plt.tight_layout()
+        plt.savefig(f'{results_folder}/refined_surrogate_model_contour.pdf')
+        plt.close()
+
+        pickle.dump(sm, open(f'{results_folder}/best_refined_surrogate_model.pkl', 'wb'))
+        pickle.dump((x_data, y_data), open(f'{results_folder}/best_refined_surrogate_model_training_data.pkl', 'wb'))
+        return x_opt, y_opt, ind_best, x_data, y_data
+
+def validate_surrogate_model(design_space, xdoe_train, ydoe_train, xdoe_test, ydoe_test, validation_save_name, save_folder="results_symm_ego"):
+    '''Validates the surrogate model (Kriging) by evaluating it on an unseen test set.
+    Computes R² score and creates diagnostic plots.
+    
+    Args:
+        design_space: SMT DesignSpace object
+        xdoe_train: training input samples (N_train, n_dims)
+        ydoe_train: training output values (N_train, 1)
+        xdoe_test: test input samples (N_test, n_dims)
+        ydoe_test: test output values (N_test, 1)
+        save_folder: folder to save plots
+    Returns:
+        Dictionary with metrics (r2_score, rmse, mae, sm)
+    '''
+    import matplotlib.pyplot as plt
+    from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+    
+    # Train the surrogate model
+    print("\n" + "="*60)
+    print("SURROGATE MODEL VALIDATION")
+    print("="*60)
+    print(f"Training set size: {xdoe_train.shape[0]} samples")
+    print(f"Test set size: {xdoe_test.shape[0]} samples")
+    
+    sm = KRG(design_space=design_space, n_start=25, print_global=False)
+    sm.set_training_values(xdoe_train, ydoe_train)
+    sm.train()
+    
+    # Predict on both sets
+    y_train_pred = sm.predict_values(xdoe_train)
+    y_test_pred = sm.predict_values(xdoe_test)
+    
+    # Compute metrics
+    r2_train = r2_score(ydoe_train, y_train_pred)
+    r2_test = r2_score(ydoe_test, y_test_pred)
+    rmse_train = np.sqrt(mean_squared_error(ydoe_train, y_train_pred))
+    rmse_test = np.sqrt(mean_squared_error(ydoe_test, y_test_pred))
+    mae_train = mean_absolute_error(ydoe_train, y_train_pred)
+    mae_test = mean_absolute_error(ydoe_test, y_test_pred)
+    
+    print(f"\nTraining Set Metrics:")
+    print(f"  R² Score: {r2_train:.4f}")
+    print(f"  RMSE:     {rmse_train:.6e}")
+    print(f"  MAE:      {mae_train:.6e}")
+    
+    print(f"\nTest Set Metrics:")
+    print(f"  R² Score: {r2_test:.4f}")
+    print(f"  RMSE:     {rmse_test:.6e}")
+    print(f"  MAE:      {mae_test:.6e}")
+    
+    if r2_test < 0.80:
+        print("\n  WARNING: Test R² < 0.80. Consider adding more DOE samples.")
+    elif r2_test < 0.85:
+        print("\n  CAUTION: Test R² < 0.85. Model quality is moderate.")
+    else:
+        print("\n Model quality is good. Ready to proceed with EGO.")
+    
+    print("="*60 + "\n")
+    
+    # Create diagnostic plots
+    fig, axes = plt.subplots(2, 2, figsize=(14, 11))
+    
+    # Plot 1: Predicted vs Actual (Training and Test)
+    ax = axes[0, 0]
+    ax.scatter(ydoe_train, y_train_pred, alpha=0.6, label='Training', s=50)
+    ax.scatter(ydoe_test, y_test_pred, alpha=0.6, label='Test', s=50, marker='^')
+    y_min, y_max = min(ydoe_train.min(), ydoe_test.min()), max(ydoe_train.max(), ydoe_test.max())
+    ax.plot([y_min, y_max], [y_min, y_max], 'k--', lw=2, label='Perfect prediction')
+    ax.set_xlabel('Actual Output')
+    ax.set_ylabel('Predicted Output')
+    ax.set_title('Predicted vs Actual Values')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    # Plot 2: Residuals (Test Set)
+    ax = axes[0, 1]
+    residuals = ydoe_test.flatten() - y_test_pred.flatten()
+    ax.scatter(y_test_pred, residuals, alpha=0.6, s=50)
+    ax.axhline(y=0, color='k', linestyle='--', lw=2)
+    ax.set_xlabel('Predicted Output')
+    ax.set_ylabel('Residuals')
+    ax.set_title('Residuals vs Predicted Values (Test Set)')
+    ax.grid(True, alpha=0.3)
+    
+    # Plot 3: Design Space Coverage
+    ax = axes[1, 0]
+    ax.scatter(xdoe_train[:, 0], xdoe_train[:, 1], alpha=0.6, s=50, label='Training')
+    ax.scatter(xdoe_test[:, 0], xdoe_test[:, 1], alpha=0.6, s=50, marker='^', label='Test')
+    ax.set_xlabel('d0 [nm]')
+    ax.set_ylabel('d1 [nm]')
+    ax.set_title('Design Space Coverage')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    # Plot 4: R² Score Comparison
+    ax = axes[1, 1]
+    models = ['Training', 'Test']
+    r2_scores = [r2_train, r2_test]
+    colors = ['green' if r2 > 0.85 else 'orange' if r2 > 0.80 else 'red' for r2 in r2_scores]
+    bars = ax.bar(models, r2_scores, color=colors, alpha=0.7, edgecolor='black', linewidth=2)
+    ax.axhline(y=0.85, color='green', linestyle='--', linewidth=2, label='Good (0.85)')
+    ax.axhline(y=0.80, color='orange', linestyle='--', linewidth=2, label='Acceptable (0.80)')
+    ax.set_ylabel('R² Score')
+    ax.set_title('Model Performance')
+    ax.set_ylim([0, 1])
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis='y')
+    # Add value labels on bars
+    for bar, score in zip(bars, r2_scores):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+                f'{score:.3f}', ha='center', va='bottom', fontweight='bold')
+    
+    plt.subplots_adjust(top=0.95, bottom=0.08, left=0.1, right=0.95, hspace=0.35, wspace=0.3)
+    plt.savefig(f'{save_folder}/surrogate_model_validation_{validation_save_name}.pdf', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    return {
+        'r2_train': r2_train,
+        'r2_test': r2_test,
+        'rmse_train': rmse_train,
+        'rmse_test': rmse_test,
+        'mae_train': mae_train,
+        'mae_test': mae_test,
+        'surrogate_model': sm
+    }
+
+if __name__ == "__main__":
+    if not os.path.exists(results_folder):
+        os.makedirs(results_folder)
     ##############################
     #EGO setup
     ##############################
-    n_ego_iter = 30
+    n_ego_iter = 20
     xlimits = np.array([[100,700], [100,700]])
     seed = 777
+    np.random.seed(seed)
     design_space = DesignSpace(xlimits, seed=seed)
     criterion = 'EI'
-    ndoe = 20
-
+    ndoe = 40 #split into 70% train (28 samples) and 30% test (12 samples)
     #build DOE
-    sampling = LHS(xlimits=xlimits, seed=seed)
-    xdoe = sampling(ndoe)
+    #sampling = LHS(xlimits=xlimits, seed=seed)
+    #xdoe = sampling(ndoe)
+    #ydoe = []
 
-    sm = KRG(design_space=design_space, n_start=25, print_global=False)
-    ego = EGO(
-        n_iter=n_ego_iter,
-        criterion=criterion,
-        xdoe=xdoe,
-        surrogate=sm,
-        n_start=25,
-    )
+    #for xd in xdoe:
+    #    ydoe.append(metaprop_update(xd))
+    #ydoe = np.array(ydoe).reshape(-1,1)
+    #with MPIPoolExecutor() as executor:
+    #    ydoe = np.array(list(executor.map(metaprop_update, xdoe)))
+    #    ydoe = ydoe.reshape(-1,1)
 
-    x_opt, y_opt, ind_best, x_data, y_data = ego.optimize(fun=metaprop_update)
-    #save the optimization results to a text file    
-    np.savetxt(f'{results_folder}/ego_opt_results.txt', np.hstack((x_opt,y_opt)))
+    #stacked = np.hstack((xdoe,ydoe))
+    #save the doe results to a text file, building a dataset: each row has 4 columns: d0, d1, d2, cost function value
+    #np.savetxt(f'{results_folder}/ego_doe.txt', stacked)
 
-if __name__ == "__main__":
-    run_ego()
+    #ydoe is the result of evaluating the xdoe samples
+    #instead of giving the surrogate model the whole doe, we shall
+    #define a train-test split of the doe, and give the surrogate model only the training set
+    #train_size = int(ndoe * 0.7)
+    #xdoe_train = xdoe[:train_size].reshape(-1,2)
+    #ydoe_train = ydoe[:train_size].reshape(-1,1)
+    #xdoe_test = xdoe[train_size:].reshape(-1,2)
+    #ydoe_test = ydoe[train_size:].reshape(-1,1)
+
+    #validate the surrogate model
+    #validation_results = validate_surrogate_model(design_space, xdoe_train, ydoe_train, xdoe_test, ydoe_test, 'validation_before_ego', save_folder=results_folder)
+
+    print("Starting EGO optimization...")
+
+    x_opt, y_opt, ind_best, x_data, y_data = run_ego(design_space, n_ego_iter, criterion, 0, 0, xlimits)
+
+    #after running ego, we need to make the following checks:
+    #1) assemble the new dataset comprised of the original training points together with the new points evaluated by EGO,
+    #2) the test points defined at the beginning shall remain untouched
+    #3) we retrain the KRG surrogate using the original train set together with the new EGO evaluated points
+    #4) we validate the surrogate model using the original test set and observe model performance metrics
+    #5) we may want to visualize the 3D curve representing the model on the design space, 
+    # plotting in the same figure the train points, the test points, the EGO evaluated points and the optimal point found by EGO
+    #train_and_ego_points = x_data
+    #train_and_ego_values = y_data
+    #validation_results_after_optimization = validate_surrogate_model(design_space, train_and_ego_points, train_and_ego_values, xdoe_test, ydoe_test, 'validation_after_ego', save_folder=results_folder)
+    #make the 3D plot of the surrogate model after EGO optimization
+    #sm_after_ego = validation_results_after_optimization['surrogate_model']
+    #fig = plt.figure(figsize=(10, 8))
+    #ax = fig.add_subplot(111, projection='3d')
+    # Create a grid for plotting the surrogate model surface
+    # predictions are very cheap thanks to the model)
+    #x1 = np.linspace(xlimits[0, 0], xlimits[0, 1], 50)
+    #x2 = np.linspace(xlimits[1, 0], xlimits[1, 1], 50)
+    #X1, X2 = np.meshgrid(x1, x2)
+    #X_grid = np.column_stack((X1.flatten(), X2.flatten()))
+    #y_grid_pred = sm_after_ego.predict_values(X_grid).reshape(X1.shape)
+    #surf = ax.plot_surface(X1, X2, y_grid_pred, cmap='viridis', alpha=0.7, edgecolor='none')
+    # Plot training points
+    #ax.scatter(train_and_ego_points[:, 0], train_and_ego_points[:, 1], train_and_ego_values.flatten(), color='blue', marker='o', label='EGO Points', s=50)
+    # Plot only the original training points (without the EGO additional)
+    #ax.scatter(xdoe_train[:, 0], xdoe_train[:, 1], ydoe_train.flatten(), color='green', label='Original Train Points', s=50, marker='o')
+    # Plot test points
+    #ax.scatter(xdoe_test[:, 0], xdoe_test[:, 1], ydoe_test.flatten(), color='red', label='Test Points', s=50, marker='^')
+    # Highlight the optimal point found by EGO
+    #ax.scatter(x_opt[0], x_opt[1], y_opt, color='gold', label='EGO Optimum', s=100, edgecolor='black', marker='*')
+    #ax.set_xlabel('d0 [nm]')
+    #ax.set_ylabel('d1 [nm]')
+    #ax.set_zlabel('Cost Function Value')
+    #ax.legend()
+    #plt.savefig(f'{results_folder}/surrogate_model_surface_after_ego.pdf', dpi=300, bbox_inches='tight')
+    #plt.close()

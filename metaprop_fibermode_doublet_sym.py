@@ -1,14 +1,35 @@
+import os
+
+save_folder = "results_sym"
+if not os.path.exists(save_folder):
+    os.makedirs(save_folder)
+
+lock_file_path = f"{save_folder}/lock_file.lock"
+if os.path.exists(lock_file_path):
+    with open(lock_file_path, "r") as lock_file:
+        lock_status = lock_file.read().strip()
+        if lock_status != "open":
+            print("A lock is preventing this script to run.")
+            exit(0)
+        elif lock_status == "open":
+            print("Lock is open. Continuing execution.")
+else:
+    print("A lock file must exist before running.")
+    exit(0)
+
 import time
 import multiprocessing
 
 import pyfftw
 #pyFFTW setup
-n_cpu = multiprocessing.cpu_count()
+#n_cpu = multiprocessing.cpu_count()
+n_cpu = 1
 pyfftw.config.NUM_THREADS = n_cpu
-pyfftw.interfaces.cache.enable()
-pyfftw.config.PLANNER_EFFORT = 'FFTW_MEASURE'
+pyfftw.interfaces.cache.disable()
+pyfftw.config.PLANNER_EFFORT = 'FFTW_ESTIMATE'
 
 import nlopt
+nlopt.srand(42)
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,12 +38,6 @@ import matplotlib.patches as patches
 plt.rcParams.update({'font.size': 14})
 
 from scipy.special import jv, kv
-
-import os
-
-save_folder = "results_sym"
-if not os.path.exists(save_folder):
-    os.makedirs(save_folder)
 
 ##############################
 #physics and simulation domain
@@ -39,7 +54,7 @@ k0 = 2 * np.pi / lda0
 k1 = 2 * np.pi / lda1
 k2 = 2 * np.pi / lda2
 
-opt_max_eval = 200
+opt_max_eval = 150
 
 unit_cell_pitch = 700e-9 #equivalent to spatial sampling
 
@@ -73,9 +88,9 @@ rho = np.sqrt(X**2 + Y**2)
 
 sampling_period = xs[1] - xs[0]
 
-d0 = 353e-6 #propagation distance: source - MS1 [m]
+d0 = 476e-6 #propagation distance: source - MS1 [m]
 d_source = d0 - lda0 / 2  #propagation distance: source - MS1 used for FDTD simulations [m]
-d1 = 218e-6 #propagation distance: MS1 - MS2 [m]
+d1 = 510e-6 #propagation distance: MS1 - MS2 [m]
 d2 = d0 #propagation distance: MS2 - target [m]
 
 phase_min = 0
@@ -89,7 +104,7 @@ beam_waist = 5.2e-6 #[um]
 output_fiber_core_diameter = 19e-6 #[um]
 #fibre cladding diameter
 fibre_cladding_diameter = 125e-6 #[um]
-max_available_diameter = 122e-6
+max_available_diameter = 122e-6 #[um]
 ##############################
 
 ##############################
@@ -98,15 +113,18 @@ fft_input_array = pyfftw.empty_aligned((Nx, Ny), dtype='complex128', n=16)
 fft_output_array = pyfftw.empty_aligned((Nx, Ny), dtype='complex128', n=16)
 ifft_input_array = pyfftw.empty_aligned((Nx, Ny), dtype='complex128', n=16)
 ifft_output_array = pyfftw.empty_aligned((Nx, Ny), dtype='complex128', n=16)
-
-fft_operator = pyfftw.FFTW(fft_input_array, fft_output_array, axes=(0,1), direction='FFTW_FORWARD', threads=n_cpu, flags=('FFTW_MEASURE','FFTW_DESTROY_INPUT',))
-ifft_operator = pyfftw.FFTW(ifft_input_array, ifft_output_array, axes=(0,1), direction='FFTW_BACKWARD', threads=n_cpu, flags=('FFTW_MEASURE','FFTW_DESTROY_INPUT',))
+fft_input_array.fill(0)
+fft_output_array.fill(0)
+ifft_input_array.fill(0)
+ifft_output_array.fill(0)
+fft_operator = pyfftw.FFTW(fft_input_array, fft_output_array, axes=(0,1), direction='FFTW_FORWARD', threads=n_cpu, flags=('FFTW_ESTIMATE',))
+ifft_operator = pyfftw.FFTW(ifft_input_array, ifft_output_array, axes=(0,1), direction='FFTW_BACKWARD', threads=n_cpu, flags=('FFTW_ESTIMATE',))
 ##############################
 
 ##############################
 #setting up spatial frequencies
 ks = 2 * np.pi / sampling_period
-kappas = np.arange(-Nx//2, Nx//2) * ks / Nx
+kappas = np.arange(-Nx//2+1, Nx//2+1) * ks / Nx
 KX, KY = np.meshgrid(kappas, kappas)
 K_parallel = np.sqrt(KX**2 + KY**2)
 nu_parallel = K_parallel / (2 * np.pi)
@@ -443,13 +461,14 @@ make_2Dplot_of(source_field_2d, choose_quantity="phase", save_name="source_field
 ###########################
 #initialize input field (propagated source field)
 input_field = propagate_source(source_field)
+input_field_2d = input_field.reshape((Nx, Ny)) #reshape to 2D for plotting
+#save the input field to numpy array
+np.save(f"{save_folder}/input_field_{d0}_{d1}.npy", input_field_2d)
 #propagate the source field to the plane just before MS1 and save it to a numpy array, to be used in FDTD simulations
 input_field_before_MS1 = propagate_source_before_MS1(source_field)
 np.save(f"{save_folder}/input_field_before_MS1.npy", input_field_before_MS1.reshape((Nx, Ny)))
 
-input_field_2d = input_field.reshape((Nx, Ny)) #reshape to 2D for plotting
-#save the input field to numpy array
-np.save(f"{save_folder}/input_field.npy", input_field_2d)
+
 #input field integrated intensity
 input_field_intensity = np.sum(np.abs(input_field)**2)
 print("Input field integrated intensity: %.4e" % input_field_intensity)
@@ -475,7 +494,6 @@ make_2Dplot_of(target_Efield_2d, choose_quantity="phase", save_name="target_fiel
 ###########################
 #initialize the normalized phase masks and global phase mask
 w_norm = np.zeros((2*S)) #concatenated normalized parameters for both masks
-
 rho = np.sqrt(X**2 + Y**2)
 circular_mask_1 = np.where(rho.flatten() < output_fiber_core_diameter/3, 1, 0)
 #w_norm[:S] += circular_mask_1
